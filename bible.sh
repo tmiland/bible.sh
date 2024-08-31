@@ -60,7 +60,7 @@ then
 else
   echo "Please enter a valid book name"
 fi
-
+shopt -s nocasematch
 case "$book" in
   GEN|Genesis)
     bible_book_name="Genesis"
@@ -360,6 +360,24 @@ case "$version" in
   KJV)
     num=1
     ;;
+  KJVAAE)
+    num=546
+    ;;
+  NKJV)
+    num=114
+    ;;
+  NIV)
+    num=111
+    ;;
+  ESV)
+    num=59
+    ;;
+  NLT)
+    num=116
+    ;;
+  AMP)
+    num=1588
+    ;;
 esac
 
 if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
@@ -379,7 +397,7 @@ then
   echo "$1 does not contain any characters"
 fi
 
-# URL 
+# URL
 URL=https://www.bible.com/bible/$num/"$bible_book"."$chapter"."$verse"."$version"
 
 # tmpfile
