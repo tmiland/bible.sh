@@ -54,6 +54,27 @@ chapter=$2
 verse=$3
 version=$4
 
+# Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
+chapter_verse=$(echo "$2" | grep -oE "[0-9]+:[0-9]+")
+verse_range=$(echo "$3" | grep -oE "[0-9]+-[0-9]+")
+
+if [ -n "$chapter_verse" ]
+then
+  chapter=$(echo "$chapter_verse" | cut -d':' -f1)
+  verse=$(echo "$chapter_verse" | cut -d':' -f2)
+fi
+
+if [ -n "$verse_range" ]
+then
+  verse="$verse_range"
+else
+  if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
+  then
+    echo "Please enter verse number"
+    exit 0
+  fi
+fi
+
 if [[ ! $1 == "" ]]
 then
   book="$1"
@@ -379,12 +400,6 @@ case "$version" in
     num=1588
     ;;
 esac
-
-if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
-then
-  echo "Please enter verse number"
-  exit 0
-fi
 
 if [[ ! "$chapter" =~ ^[[:digit:]]+$ ]]
 then
