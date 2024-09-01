@@ -46,6 +46,28 @@
 # Symlink: ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 BQUOTE='“'
 EQUOTE='”'
+# Use colors, but only if connected to a terminal, and that terminal
+# supports them.
+if which tput >/dev/null 2>&1; then
+  ncolors=$(tput colors)
+fi
+if [ -t 1 ] && [ -n "$ncolors" ] && [ "$ncolors" -ge 8 ]; then
+  #RED="$(tput setaf 1)"
+  GREEN="$(tput setaf 2)"
+  YELLOW="$(tput setaf 3)"
+  BLUE="$(tput setaf 4)"
+  BOLD="$(tput bold)"
+  DIM="$(tput dim)"
+  NC="$(tput sgr0)"
+else
+  #RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  BLUE='\033[0;34m'
+  BOLD="\033[1m"
+  DIM="\033[2m"
+  NC='\033[0m'
+fi
 # Maximum column width
 width=$((77))
 bible_book_name=
@@ -478,13 +500,18 @@ then
   EQUOTE=''
 fi
 
+if [[ $description == "" ]]
+then
+    description=$(echo "This verse has been omitted from this Bible version...")
+fi
+
 bible() {
-  echo -n "${BQUOTE}$description${EQUOTE}"
+  echo -n "${BQUOTE}${BLUE}$description${NC}${EQUOTE}"
   echo ""
   echo ""
-  echo -n "$title - ($ver)"
+  echo -n "${GREEN}$title${NC} - ${YELLOW}($ver)${NC}"
   echo ""
-  echo -n "$link"
+  echo -n "${DIM}$link${NC}"
 }
 
 bible "$@"
