@@ -111,6 +111,11 @@ https://www.bible.com/no/bible/30/ISA.54.17.N78BM
 ---------------------
 ```
 
+## Credits
+- Contains code from these sources:
+  * [bible_verse-cli](https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse)
+  * Answer on stackoverflow: [Iterate over arguments](https://stackoverflow.com/a/37056727)
+
 ## Donations
 <a href="https://coindrop.to/tmiland" target="_blank"><img src="https://coindrop.to/embed-button.png" style="border-radius: 10px; height: 57px !important;width: 229px !important;" alt="Coindrop.to me"></img></a>
 
