@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2004,SC2317,SC2053
 
-## Author: Tommy Miland (@tmiland) - Copyright (c) 2023
+## Author: Tommy Miland (@tmiland) - Copyright (c) 2024
 
 
 ######################################################################
@@ -17,7 +17,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2023 Tommy Miland
+# Copyright (c) 2024 Tommy Miland
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,9 +44,10 @@
 # set -o nounset
 # set -o xtrace
 # Symlink: ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
-BQUOTE='❝'
-EQUOTE='❞'
-
+BQUOTE='“'
+EQUOTE='”'
+# Maximum column width
+width=$((77))
 bible_book_name=
 bible_book=
 book=$1
@@ -412,23 +413,25 @@ then
   echo "$1 does not contain any characters"
 fi
 
-# URL
-URL=https://www.bible.com/bible/$num/"$bible_book"."$chapter"."$verse"."$version"
+get_bible_verse() {
+  # tmpfile
+  tmp=/tmp/bible.tmp
+  # Grab verse and store in tmp file
+  curl --silent https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
+}
 
-# tmpfile
-tmp=/tmp/bible.tmp
-# Grab verse and store in tmp file
-curl --silent "$URL" > $tmp
+get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
 
 description=$(
-  cat $tmp |
-  xml2 2>/dev/null |
-  grep "meta/@name=twitter:description" --no-group-separator -B1 |
-  sed 's|/html/head/meta/@name=twitter:description||g' |
-  sed 's|/html/head/meta/@content=||g' |
+  xmllint --html --xpath '//*[@class="text-text-light dark:text-text-dark text-17 md:text-19 leading-default md:leading-comfy font-aktiv-grotesk font-medium mbe-2"]/text()' $tmp 2>/dev/null |
+  # Strip new lines
   tr '\n' ' ' |
-  sed 's/[ \t]*$//'
-)
+  # Strip multiple spaces
+  tr -s ' ' |
+  # Strip trailing space
+  sed 's/.$//' |
+  # Set description widt
+fold -w ${width} -s)
 
 title=$(
   cat $tmp |
@@ -436,18 +439,16 @@ title=$(
   grep "meta/@name=twitter:title" --no-group-separator -B1 |
   sed 's|/html/head/meta/@name=twitter:title||g' |
   sed 's|/html/head/meta/@content=||g' |
-  # tr '\n' ' ' |
   sed 's/[ \t]*$//' |
   grep -o '.*[[:digit:]]:[[:digit:]]'
 )
 
-version=$(
+ver=$(
   cat $tmp |
   xml2 2>/dev/null |
   grep "meta/@name=twitter:title" --no-group-separator -B1 |
   sed 's|/html/head/meta/@name=twitter:title||g' |
   sed 's|/html/head/meta/@content=||g' |
-  # tr '\n' ' ' |
   sed 's/[ \t]*$//' |
   grep -o -P '(?<=\().*(?=\))'
 )
@@ -458,14 +459,30 @@ link=$(
   grep "meta/@name=twitter:url" --no-group-separator -B1 |
   sed 's|/html/head/meta/@name=twitter:url||g' |
   sed 's|/html/head/meta/@content=||g' |
-  tr '\n' ' '
+  tr '\n' ' ' |
+  tr -s ' ' |
+  sed 's/.$//'
 )
+
+# Strip unwanted symbol from version
+if [[ $version == "N78BM" ]]
+then
+  description=$(echo "$description" | sed "s|¬||g")
+fi
+
+# Strip quotes from description if any
+if [[ $description =~ $BQUOTE ]] ||
+[[ $description =~ $EQUOTE ]]
+then
+  BQUOTE=''
+  EQUOTE=''
+fi
 
 bible() {
   echo -n "${BQUOTE}$description${EQUOTE}"
   echo ""
   echo ""
-  echo -n "$title - ($version)"
+  echo -n "$title - ($ver)"
   echo ""
   echo -n "$link"
 }
