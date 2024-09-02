@@ -422,6 +422,9 @@ case "$version" in
   AMP)
     num=1588
     ;;
+  GNV)
+    num=2163
+    ;;
 esac
 
 if [[ ! "$chapter" =~ ^[[:digit:]]+$ ]]
@@ -451,9 +454,8 @@ description=$(
   # Strip multiple spaces
   tr -s ' ' |
   # Strip trailing space
-  sed 's/.$//' |
-  # Set description widt
-fold -w ${width} -s)
+  sed 's/.$//'
+)
 
 title=$(
   cat $tmp |
@@ -489,7 +491,9 @@ link=$(
 # Strip unwanted symbol from version
 if [[ $version == "N78BM" ]]
 then
-  description=$(echo "$description" | sed "s|¬||g")
+  description=$(
+    echo "$description" | sed "s|¬||g"
+  )
 fi
 
 # Strip quotes from description if any
@@ -502,16 +506,32 @@ fi
 
 if [[ $description == "" ]]
 then
-    description=$(echo "This verse has been omitted from this Bible version...")
+  description=$(
+    echo "This verse has been omitted from this Bible version..."
+  )
 fi
 
+# Fold description to set width
+description_folded=$(echo "$description" | fold -w ${width} -s)
+
 bible() {
-  echo -n "${BQUOTE}${BLUE}$description${NC}${EQUOTE}"
-  echo ""
-  echo ""
-  echo -n "${GREEN}$title${NC} - ${YELLOW}($ver)${NC}"
-  echo ""
-  echo -n "${DIM}$link${NC}"
+  if [[ "$*" == *"trans"* ]]
+  then
+    printf "\n"
+    echo -n "$description"
+    printf "\n"
+    printf "\n"
+  else
+    printf "\n"
+    echo -n "${BQUOTE}${BLUE}$description_folded${NC}${EQUOTE}"
+    echo ""
+    echo ""
+    echo -n "${GREEN}$title${NC} - ${YELLOW}($ver)${NC}"
+    echo ""
+    echo -n "${DIM}$link${NC}"
+    printf "\n"
+    printf "\n"
+  fi
 }
 
 bible "$@"
