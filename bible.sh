@@ -178,7 +178,7 @@ case "$book" in
     bible_book_name="Job"
     bible_book="JOB"
     ;;
-  PSA|Psalm)
+  PSA|Psalm|psalms)
     bible_book_name="Psalm"
     bible_book="PSA"
     ;;
