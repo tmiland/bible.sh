@@ -516,7 +516,12 @@ fi
 description_folded=$(echo "$description" | fold -w ${width} -s)
 
 bible() {
-  if [[ "$*" == *"trans"* ]]
+  if [[ $description =~ "omitted" ]]
+  then
+    printf "\n"
+    echo -n "${BQUOTE}${BLUE}$description_folded${NC}${EQUOTE}"
+    printf "\n"
+  elif [[ "$*" == *"trans"* ]]
   then
     printf "\n"
     echo -n "$description"
