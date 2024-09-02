@@ -52,6 +52,17 @@ EQUOTE='”'
 if which tput >/dev/null 2>&1; then
   ncolors=$(tput colors)
 fi
+
+if [[ $* =~ "nocolor" ]]
+then
+  #RED='\033[0;31m'
+  GREEN=''
+  YELLOW=''
+  BLUE=''
+  BOLD=""
+  DIM=""
+  NC=''
+else
 if [ -t 1 ] && [ -n "$ncolors" ] && [ "$ncolors" -ge 8 ]; then
   #RED="$(tput setaf 1)"
   GREEN="$(tput setaf 2)"
@@ -68,6 +79,7 @@ else
   BOLD="\033[1m"
   DIM="\033[2m"
   NC='\033[0m'
+fi
 fi
 # Maximum column width
 width=$((77))
@@ -92,10 +104,13 @@ if [ -n "$verse_range" ]
 then
   verse="$verse_range"
 else
-  if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
+  if [[ ! $3 =~ "listen" ]]
   then
-    echo "Please enter verse number"
-    exit 0
+    if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
+    then
+      echo "Please enter verse number"
+      exit 0
+    fi
   fi
 fi
 
@@ -473,7 +488,7 @@ title=$(
   sed 's|/html/head/meta/@name=twitter:title||g' |
   sed 's|/html/head/meta/@content=||g' |
   sed 's/[ \t]*$//' |
-  grep -o '.*[[:digit:]]:[[:digit:]]'
+  grep -o '.*[[:digit:]]:[[:digit:]]*.[[:digit:]]*'
 )
 
 ver=$(
@@ -514,6 +529,43 @@ votd_img=$(
   sed 's|/html/head/meta/@name=twitter:image||g' |
   sed 's|/html/head/meta/@content=||g'
 )
+
+if [[ $3 == "listen" ]]
+then
+  listen_mp3_tmp=/tmp/mp3.html
+
+  listen_mp3_url=$(
+    curl --silent https://www.bible.com/audio-bible/"$num"/"$bible_book"."$chapter"."$version" > $listen_mp3_tmp
+    cat $listen_mp3_tmp |
+    grep -Po "https.*?(?=\")" |
+    grep -i audio-bible-cdn |
+    head -n 1
+  )
+
+  listen_mp3_headline=$(
+    cat $listen_mp3_tmp |
+    grep -Po "headline\":\".*?(?=\")" |
+    sed "s|headline\":\"||g" |
+    head -n 1
+  )
+
+  listen_mp3_transcript=$(
+    cat $listen_mp3_tmp |
+    grep -Po "transcript\":\".*?(?=\")" |
+    sed "s|transcript\":\"||g" |
+    xargs |
+    sed "s|\.n|. \n\n|g"
+  )
+
+  listen_mp3_link=$(
+    cat $listen_mp3_tmp |
+    grep -Po "\"@type\":\"WebPage\",\"@id\":\".*?(?=\")" |
+    sed "s|\"@type\":\"WebPage\",\"@id\":\"||g"
+  )
+
+  vlc "$listen_mp3_url" >/dev/null 2>&1 &
+  rm $listen_mp3_tmp
+fi
 
 if [[ $1 == "votd" ]]
 then
@@ -581,7 +633,18 @@ fi
 description_folded=$(echo "$description" | fold -w ${width} -s)
 
 bible() {
-  if [[ $description =~ "omitted" ]]
+  if [[ $3 == "listen" ]]
+  then
+    printf "\n"
+    echo -n "$listen_mp3_headline"
+    printf "\n"
+    printf "\n"
+    echo "$listen_mp3_transcript" | fold -w ${width} -s
+    printf "\n"
+    printf "\n"
+    echo "$listen_mp3_link"
+    printf "\n"
+  elif [[ $description =~ "omitted" ]]
   then
     printf "\n"
     echo -n "${BQUOTE}${BLUE}$description_folded${NC}${EQUOTE}"
