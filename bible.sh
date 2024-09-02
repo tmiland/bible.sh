@@ -507,7 +507,8 @@ fi
 if [[ $description == "" ]]
 then
   description=$(
-    echo "This verse has been omitted from this Bible version..."
+    echo "This verse has been omitted from this Bible version,"
+    echo "or a number out of range has been entered."
   )
 fi
 
