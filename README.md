@@ -3,7 +3,6 @@ Script to get bible verse from bible.com
 
 # WIP
 
-
 # Install
 
 ```shell
@@ -13,6 +12,15 @@ Symlink:
 ```shell
 ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 ```
+
+## Verse of the day
+
+Usage
+```shell
+bible votd
+```
+
+<a href="https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd.png">![votd](https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd.png)</a>
 
 ## Usage
 
