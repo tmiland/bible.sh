@@ -45,6 +45,8 @@ bible Isaiah 54 17 KJV | clip
 ### Alias to compare versions
 
 ```shell
+# Store versions in a variable for use as default
+export compare_versions=(KJV NIV NLT NKJV ESV N78BM)
 bible_compare() {
   for i in "${@:4}"
   do
@@ -60,6 +62,10 @@ bible_compare() {
 Usage
 ```shell
 bible_compare Isaiah 54 17 KJV NIV NLT NKJV ESV N78BM
+```
+Or with default variable
+```shell
+bible_compare Isaiah 54 17 $compare_versions
 ```
 
 Output:
@@ -111,10 +117,38 @@ https://www.bible.com/no/bible/30/ISA.54.17.N78BM
 ---------------------
 ```
 
+# Translate
+
+Install translate-shell
+```shell
+apt install translate-shell 
+```
+Usage:
+```shell
+bible Isaiah 54 17 KJV trans | trans :no
+```
+Output:
+```shell
+No weapon that is formed against thee shall prosper; and every tongue that shall rise against thee in judgment thou shalt condemn. This is the heritage of the servants of the LORD, and their righteousness is of me, saith the LORD.
+
+Intet våpen som dannes mot deg skal lykkes; og hver tunge som reiser seg mot deg i dommen, skal du fordømme. Dette er arven til Herrens tjenere, og deres rettferdighet kommer fra meg, sier Herren.
+
+Translations of No weapon that is formed against thee shall prosper; and every tongue that shall rise against thee in judgment thou shalt condemn. This is the heritage of the servants of the LORD, and their righteousness is of me, saith the LORD.
+[ English -> Norsk ]
+
+No weapon that is formed against thee shall prosper;
+    Intet våpen som dannes mot deg skal lykkes;, Intet våpen som blir formet mot deg, skal lykkes;
+and every tongue that shall rise against thee in judgment thou shalt condemn.
+    og hver tunge som reiser seg mot deg i dommen, skal du fordømme., og hver tunge som reiser seg mot deg for å dømme, skal du fordømme.
+This is the heritage of the servants of the LORD, and their righteousness is of me, saith the LORD.
+    Dette er arven til Herrens tjenere, og deres rettferdighet kommer fra meg, sier Herren., Dette er arven til Herrens tjenere, og deres rettferdighet tilhører meg, sier Herren.
+```
+
 ## Credits
 - Contains code from these sources:
   * [bible_verse-cli](https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse)
   * Answer on stackoverflow: [Iterate over arguments](https://stackoverflow.com/a/37056727)
+  * [Translate Shell](https://github.com/soimort/translate-shell)
 
 ## Donations
 <a href="https://coindrop.to/tmiland" target="_blank"><img src="https://coindrop.to/embed-button.png" style="border-radius: 10px; height: 57px !important;width: 229px !important;" alt="Coindrop.to me"></img></a>
