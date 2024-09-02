@@ -157,6 +157,7 @@ This is the heritage of the servants of the LORD, and their righteousness is of 
   * [bible_verse-cli](https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse)
   * Answer on stackoverflow: [Iterate over arguments](https://stackoverflow.com/a/37056727)
   * [Translate Shell](https://github.com/soimort/translate-shell)
+  * Answer on stackexchange: [What is the fastest way to view images from the terminal?](https://unix.stackexchange.com/a/745334)
 
 ## Donations
 <a href="https://coindrop.to/tmiland" target="_blank"><img src="https://coindrop.to/embed-button.png" style="border-radius: 10px; height: 57px !important;width: 229px !important;" alt="Coindrop.to me"></img></a>
