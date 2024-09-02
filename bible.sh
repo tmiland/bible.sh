@@ -44,6 +44,7 @@
 # set -o nounset
 # set -o xtrace
 # Symlink: ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
+CROSS='✝'
 BQUOTE='“'
 EQUOTE='”'
 # Use colors, but only if connected to a terminal, and that terminal
@@ -407,6 +408,9 @@ case "$version" in
   KJVAAE)
     num=546
     ;;
+  KJVAE)
+    num=547
+    ;;
   NKJV)
     num=114
     ;;
@@ -425,19 +429,24 @@ case "$version" in
   GNV)
     num=2163
     ;;
+  WBMS)
+    num=2407
+    ;;
 esac
 
-if [[ ! "$chapter" =~ ^[[:digit:]]+$ ]]
+if [[ ! $1 == "votd" ]]
 then
-  echo "Please enter chapter number"
-  exit 0
-fi
+  if [[ ! "$chapter" =~ ^[[:digit:]]+$ ]]
+  then
+    echo "Please enter chapter number"
+    exit 0
+  fi
 
-if [[ ! "$1" =~ ^[[:alpha:]]+$ ]]
-then
-  echo "$1 does not contain any characters"
+  if [[ ! "$1" =~ ^[[:alpha:]]+$ ]]
+  then
+    echo "$1 does not contain any characters"
+  fi
 fi
-
 get_bible_verse() {
   # tmpfile
   tmp=/tmp/bible.tmp
@@ -487,6 +496,62 @@ link=$(
   tr -s ' ' |
   sed 's/.$//'
 )
+
+votd=$(
+  curl --silent https://www.bible.com/verse-of-the-day > /tmp/votd.html 2>/dev/null
+  cat /tmp/votd.html |
+  xml2 2>/dev/null |
+  grep "meta/@name=twitter:description" --no-group-separator -B1 |
+  sed 's|/html/head/meta/@name=twitter:description||g' |
+  sed 's|/html/head/meta/@content=||g' |
+  sed 's/[ \t]*$//'
+)
+
+votd_img=$(
+  cat /tmp/votd.html |
+  xml2 2>/dev/null |
+  grep "meta/@name=twitter:image" --no-group-separator -B1 |
+  sed 's|/html/head/meta/@name=twitter:image||g' |
+  sed 's|/html/head/meta/@content=||g'
+)
+
+if [[ $1 == "votd" ]]
+then
+  votd_img_tmp=/tmp/votd_img.jpg
+
+  if [[ $(command -v 'curl') ]]; then
+    curl -fsSLk "$votd_img" > $votd_img_tmp
+  elif [[ $(command -v 'wget') ]]; then
+    wget -q "$votd_img" -O $votd_img_tmp
+  else
+    echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
+    exit 0
+  fi
+
+  echo -e "${BLUE}${BOLD}Verse of the Day${NC} ${CROSS}"
+  echo -e "${DIM}A daily word of exultation.${NC}"
+  echo -e "${GREEN}"
+  if [[ $(command -v 'convert') ]]
+  then
+    convert "$votd_img" -scale 300 six:-
+  else
+    echo '  _    ______  __________  '
+    echo ' | |  / / __ \/_  __/ __ \ '
+    echo ' | | / / / / / / / / / / / '
+    echo ' | |/ / /_/ / / / / /_/ /  '
+    echo ' |___/\____/ /_/ /_____/   '
+  fi
+  echo -e "${NC}"
+  title=$(echo "$votd" | grep -o '.*[[:digit:]]:[[:digit:]]*')
+  description=$(echo "$votd" | sed "s|$title ||g")
+  link=https://www.bible.com/verse-of-the-day
+  ver=NIV
+  if [[ $(command -v 'notify-send') ]]
+  then
+    notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$title\n$link"
+    rm $votd_img_tmp
+  fi
+fi
 
 # Strip unwanted symbol from version
 if [[ $version == "N78BM" ]]
