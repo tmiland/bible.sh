@@ -63,23 +63,23 @@ then
   DIM=""
   NC=''
 else
-if [ -t 1 ] && [ -n "$ncolors" ] && [ "$ncolors" -ge 8 ]; then
-  #RED="$(tput setaf 1)"
-  GREEN="$(tput setaf 2)"
-  YELLOW="$(tput setaf 3)"
-  BLUE="$(tput setaf 4)"
-  BOLD="$(tput bold)"
-  DIM="$(tput dim)"
-  NC="$(tput sgr0)"
-else
-  #RED='\033[0;31m'
-  GREEN='\033[0;32m'
-  YELLOW='\033[0;33m'
-  BLUE='\033[0;34m'
-  BOLD="\033[1m"
-  DIM="\033[2m"
-  NC='\033[0m'
-fi
+  if [ -t 1 ] && [ -n "$ncolors" ] && [ "$ncolors" -ge 8 ]; then
+    #RED="$(tput setaf 1)"
+    GREEN="$(tput setaf 2)"
+    YELLOW="$(tput setaf 3)"
+    BLUE="$(tput setaf 4)"
+    BOLD="$(tput bold)"
+    DIM="$(tput dim)"
+    NC="$(tput sgr0)"
+  else
+    #RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    BOLD="\033[1m"
+    DIM="\033[2m"
+    NC='\033[0m'
+  fi
 fi
 # Maximum column width
 width=$((77))
@@ -89,550 +89,549 @@ book=$1
 chapter=$2
 verse=$3
 version=$4
+bible() {
+  # Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
+  chapter_verse=$(echo "$2" | grep -oE "[0-9]+:[0-9]+")
+  verse_range=$(echo "$3" | grep -oE "[0-9]+-[0-9]+")
 
-# Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
-chapter_verse=$(echo "$2" | grep -oE "[0-9]+:[0-9]+")
-verse_range=$(echo "$3" | grep -oE "[0-9]+-[0-9]+")
-
-if [ -n "$chapter_verse" ]
-then
-  chapter=$(echo "$chapter_verse" | cut -d':' -f1)
-  verse=$(echo "$chapter_verse" | cut -d':' -f2)
-fi
-
-if [ -n "$verse_range" ]
-then
-  verse="$verse_range"
-else
-  if [[ ! $3 =~ "listen" ]]
+  if [ -n "$chapter_verse" ]
   then
-    if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
+    chapter=$(echo "$chapter_verse" | cut -d':' -f1)
+    verse=$(echo "$chapter_verse" | cut -d':' -f2)
+  fi
+
+  if [ -n "$verse_range" ]
+  then
+    verse="$verse_range"
+  else
+    if [[ ! $3 =~ "listen" ]]
     then
-      echo "Please enter verse number"
-      exit 0
+      if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
+      then
+        echo "Please enter verse number"
+        exit 0
+      fi
     fi
   fi
-fi
 
-if [[ ! $1 == "" ]]
-then
-  book="$1"
-else
-  echo "Please enter a valid book name"
-fi
-shopt -s nocasematch
-case "$book" in
-  GEN|Genesis)
-    bible_book_name="Genesis"
-    bible_book="GEN"
-    ;;
-  EXO|Exodus)
-    bible_book_name="Exodus"
-    bible_book="EXO"
-    ;;
-  LEV|Leviticus)
-    bible_book_name="Leviticus"
-    bible_book="LEV"
-    ;;
-  NUM|Numbers)
-    bible_book_name="Numbers"
-    bible_book="NUM"
-    ;;
-  DEU|Deuteronomy)
-    bible_book_name="Deuteronomy"
-    bible_book="DEU"
-    ;;
-  JOS|Joshua)
-    bible_book_name="Joshua"
-    bible_book="JOS"
-    ;;
-  JDG|Judges)
-    bible_book_name="Judges"
-    bible_book="JDG"
-    ;;
-  RUT|Ruth)
-    bible_book_name="Ruth"
-    bible_book="RUT"
-    ;;
-  1SA|"1 samuel")
-    bible_book_name="1 samuel"
-    bible_book="1SA"
-    ;;
-  2SA|"2 samuel")
-    bible_book_name="2 samuel"
-    bible_book="2SA"
-    ;;
-  1KI|"1 Kings")
-    bible_book_name="1 Kings"
-    bible_book="1KI"
-    ;;
-  2KI|"2 Kings")
-    bible_book_name="2 Kings"
-    bible_book="2KI"
-    ;;
-  1CH|"1 Chronicles")
-    bible_book_name="1 Chronicles"
-    bible_book="1CH"
-    ;;
-  2CH|"2 Chronicles")
-    bible_book_name="2 Chronicles"
-    bible_book="2CH"
-    ;;
-  EZR|Ezra)
-    bible_book_name="Ezra"
-    bible_book="EZR"
-    ;;
-  NEH|Nehemiah)
-    bible_book_name="Nehemiah"
-    bible_book="NEH"
-    ;;
-  EST|Esther)
-    bible_book_name="Esther"
-    bible_book="EST"
-    ;;
-  JOB|Job)
-    bible_book_name="Job"
-    bible_book="JOB"
-    ;;
-  PSA|Psalm|psalms)
-    bible_book_name="Psalm"
-    bible_book="PSA"
-    ;;
-  PRO|Proverbs)
-    bible_book_name="Proverbs"
-    bible_book="PRO"
-    ;;
-  ECC|Ecclesiastes)
-    bible_book_name="Ecclesiastes"
-    bible_book="ECC"
-    ;;
-  SNG|"Song of Solomon")
-    bible_book_name="Song of Solomon"
-    bible_book="SNG"
-    ;;
-  ISA|Isaiah)
-    bible_book_name="Isaiah"
-    bible_book="ISA"
-    ;;
-  JER|Jeremiah)
-    bible_book_name="Jeremiah"
-    bible_book="JER"
-    ;;
-  LAM|Lamentations)
-    bible_book_name="Lamentations"
-    bible_book="LAM"
-    ;;
-  EZK|Ezekiel)
-    bible_book_name="Ezekiel"
-    bible_book="EZK"
-    ;;
-  DAN|Daniel)
-    bible_book_name="Daniel"
-    bible_book="DAN"
-    ;;
-  HOS|Hosea)
-    bible_book_name="Hosea"
-    bible_book="HOS"
-    ;;
-  JOL|Joel)
-    bible_book_name="Joel"
-    bible_book="JOL"
-    ;;
-  AMO|Amos)
-    bible_book_name="Amos"
-    bible_book="AMO"
-    ;;
-  OBA|Obadiah)
-    bible_book_name="Obadiah"
-    bible_book="OBA"
-    ;;
-  JON|Jonah)
-    bible_book_name="Jonah"
-    bible_book="JON"
-    ;;
-  MIC|Micah)
-    bible_book_name="Micah"
-    bible_book="MIC"
-    ;;
-  NAM|Nahum)
-    bible_book_name="Nahum"
-    bible_book="NAM"
-    ;;
-  HAB|Habakkuk)
-    bible_book_name="Habakkuk"
-    bible_book="HAB"
-    ;;
-  ZEP|Zephaniah)
-    bible_book_name="Zephaniah"
-    bible_book="ZEP"
-    ;;
-  HAG|Haggai)
-    bible_book_name="Haggai"
-    bible_book="HAG"
-    ;;
-  ZEC|Zechariah)
-    bible_book_name="Zechariah"
-    bible_book="ZEC"
-    ;;
-  MAL|Malachi)
-    bible_book_name="Malachi"
-    bible_book="MAL"
-    ;;
-  MAT|Matthew)
-    bible_book_name="Matthew"
-    bible_book="MAT"
-    ;;
-  MRK|Mark)
-    bible_book_name="Mark"
-    bible_book="MRK"
-    ;;
-  LUK|Luke)
-    bible_book_name="Luke"
-    bible_book="LUK"
-    ;;
-  JHN|John)
-    bible_book_name="John"
-    bible_book="JHN"
-    ;;
-  ACT|Acts)
-    bible_book_name="Acts"
-    bible_book="ACT"
-    ;;
-  ROM|Romans)
-    bible_book_name="Romans"
-    bible_book="ROM"
-    ;;
-  1CO|"1 Corinthians")
-    bible_book_name="1 Corinthians"
-    bible_book="1CO"
-    ;;
-  2CO|"2 Corinthians")
-    bible_book_name="2 Corinthians"
-    bible_book="2CO"
-    ;;
-  GAL|Galatians)
-    bible_book_name="Galatians"
-    bible_book="GAL"
-    ;;
-  EPH|Ephesians)
-    bible_book_name="Ephesians"
-    bible_book="EPH"
-    ;;
-  PHP|Philippians)
-    bible_book_name="Philippians"
-    bible_book="PHP"
-    ;;
-  COL|Colossians)
-    bible_book_name="Colossians"
-    bible_book="COL"
-    ;;
-  1TH|"1 Thessalonians")
-    bible_book_name="1 Thessalonians"
-    bible_book="1TH"
-    ;;
-  2TH|"2 Thessalonians")
-    bible_book_name="2 Thessalonians"
-    bible_book="2TH"
-    ;;
-  1TI|"1 Timothy")
-    bible_book_name="1 Timothy"
-    bible_book="1TI"
-    ;;
-  2TI|"2 Timothy")
-    bible_book_name="2 Timothy"
-    bible_book="2TI"
-    ;;
-  TIT|Titus)
-    bible_book_name="Titus"
-    bible_book="TIT"
-    ;;
-  PHM|Philemon)
-    bible_book_name="Philemon"
-    bible_book="PHM"
-    ;;
-  HEB|Hebrews)
-    bible_book_name="Hebrews"
-    bible_book="HEB"
-    ;;
-  JAS|James)
-    bible_book_name="James"
-    bible_book="JAS"
-    ;;
-  1PE|"1 Peter")
-    bible_book_name="1 Peter"
-    bible_book="1PE"
-    ;;
-  2PE|"2 Peter")
-    bible_book_name="2 Peter"
-    bible_book="2PE"
-    ;;
-  1JN|"1 John")
-    bible_book_name="1 John"
-    bible_book="1JN"
-    ;;
-  2JN|"2 John")
-    bible_book_name="2 John"
-    bible_book="2JN"
-    ;;
-  3JN|"3 John")
-    bible_book_name="3 John"
-    bible_book="3JN"
-    ;;
-  JUD|Jude)
-    bible_book_name="Jude"
-    bible_book="JUD"
-    ;;
-  REV|Revelation)
-    bible_book_name="Revelation"
-    bible_book="REV"
-    ;;
-esac
-
-if [[ ! $4 == "" ]]
-then
-  version="$4"
-else
-  version="KJV"
-fi
-
-case "$version" in
-  NORSK)
-    num=121
-    ;;
-  NB)
-    num=102
-    ;;
-  N78BM)
-    num=30
-    ;;
-  N11BM)
-    num=29
-    ;;
-  ELB)
-    num=115
-    ;;
-  BGO_HVER)
-    num=2321
-    ;;
-  BGO)
-    num=2216
-    ;;
-  KJV)
-    num=1
-    ;;
-  KJVAAE)
-    num=546
-    ;;
-  KJVAE)
-    num=547
-    ;;
-  NKJV)
-    num=114
-    ;;
-  NIV)
-    num=111
-    ;;
-  ESV)
-    num=59
-    ;;
-  NLT)
-    num=116
-    ;;
-  AMP)
-    num=1588
-    ;;
-  GNV)
-    num=2163
-    ;;
-  WBMS)
-    num=2407
-    ;;
-esac
-
-if [[ ! $1 == "votd" ]]
-then
-  if [[ ! "$chapter" =~ ^[[:digit:]]+$ ]]
+  if [[ ! $1 == "" ]]
   then
-    echo "Please enter chapter number"
-    exit 0
-  fi
-
-  if [[ ! "$1" =~ ^[[:alpha:]]+$ ]]
-  then
-    echo "$1 does not contain any characters"
-  fi
-fi
-get_bible_verse() {
-  # tmpfile
-  tmp=/tmp/bible.tmp
-  # Grab verse and store in tmp file
-  curl --silent https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
-}
-
-get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
-
-description=$(
-  xmllint --html --xpath '//*[@class="text-text-light dark:text-text-dark text-17 md:text-19 leading-default md:leading-comfy font-aktiv-grotesk font-medium mbe-2"]/text()' $tmp 2>/dev/null |
-  # Strip new lines
-  tr '\n' ' ' |
-  # Strip multiple spaces
-  tr -s ' ' |
-  # Strip trailing space
-  sed 's/.$//'
-)
-
-title=$(
-  cat $tmp |
-  xml2 2>/dev/null |
-  grep "meta/@name=twitter:title" --no-group-separator -B1 |
-  sed 's|/html/head/meta/@name=twitter:title||g' |
-  sed 's|/html/head/meta/@content=||g' |
-  sed 's/[ \t]*$//' |
-  grep -o '.*[[:digit:]]:[[:digit:]]*.[[:digit:]]*'
-)
-
-ver=$(
-  cat $tmp |
-  xml2 2>/dev/null |
-  grep "meta/@name=twitter:title" --no-group-separator -B1 |
-  sed 's|/html/head/meta/@name=twitter:title||g' |
-  sed 's|/html/head/meta/@content=||g' |
-  sed 's/[ \t]*$//' |
-  grep -o -P '(?<=\().*(?=\))'
-)
-
-link=$(
-  cat $tmp |
-  xml2 2>/dev/null |
-  grep "meta/@name=twitter:url" --no-group-separator -B1 |
-  sed 's|/html/head/meta/@name=twitter:url||g' |
-  sed 's|/html/head/meta/@content=||g' |
-  tr '\n' ' ' |
-  tr -s ' ' |
-  sed 's/.$//'
-)
-
-votd=$(
-  curl --silent https://www.bible.com/verse-of-the-day > /tmp/votd.html 2>/dev/null
-  cat /tmp/votd.html |
-  xml2 2>/dev/null |
-  grep "meta/@name=twitter:description" --no-group-separator -B1 |
-  sed 's|/html/head/meta/@name=twitter:description||g' |
-  sed 's|/html/head/meta/@content=||g' |
-  sed 's/[ \t]*$//'
-)
-
-votd_img=$(
-  cat /tmp/votd.html |
-  xml2 2>/dev/null |
-  grep "meta/@name=twitter:image" --no-group-separator -B1 |
-  sed 's|/html/head/meta/@name=twitter:image||g' |
-  sed 's|/html/head/meta/@content=||g'
-)
-
-if [[ $3 == "listen" ]]
-then
-  listen_mp3_tmp=/tmp/mp3.html
-
-  listen_mp3_url=$(
-    curl --silent https://www.bible.com/audio-bible/"$num"/"$bible_book"."$chapter"."$version" > $listen_mp3_tmp
-    cat $listen_mp3_tmp |
-    grep -Po "https.*?(?=\")" |
-    grep -i audio-bible-cdn |
-    head -n 1
-  )
-
-  listen_mp3_headline=$(
-    cat $listen_mp3_tmp |
-    grep -Po "headline\":\".*?(?=\")" |
-    sed "s|headline\":\"||g" |
-    head -n 1
-  )
-
-  listen_mp3_transcript=$(
-    cat $listen_mp3_tmp |
-    grep -Po "transcript\":\".*?(?=\")" |
-    sed "s|transcript\":\"||g" |
-    xargs |
-    sed "s|\.n|. \n\n|g"
-  )
-
-  listen_mp3_link=$(
-    cat $listen_mp3_tmp |
-    grep -Po "\"@type\":\"WebPage\",\"@id\":\".*?(?=\")" |
-    sed "s|\"@type\":\"WebPage\",\"@id\":\"||g"
-  )
-
-  vlc "$listen_mp3_url" >/dev/null 2>&1 &
-  rm $listen_mp3_tmp
-fi
-
-if [[ $1 == "votd" ]]
-then
-  votd_img_tmp=/tmp/votd_img.jpg
-
-  if [[ $(command -v 'curl') ]]; then
-    curl -fsSLk "$votd_img" > $votd_img_tmp
-  elif [[ $(command -v 'wget') ]]; then
-    wget -q "$votd_img" -O $votd_img_tmp
+    book="$1"
   else
-    echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
-    exit 0
+    echo "Please enter a valid book name"
   fi
+  shopt -s nocasematch
+  case "$book" in
+    GEN|Genesis)
+      bible_book_name="Genesis"
+      bible_book="GEN"
+      ;;
+    EXO|Exodus)
+      bible_book_name="Exodus"
+      bible_book="EXO"
+      ;;
+    LEV|Leviticus)
+      bible_book_name="Leviticus"
+      bible_book="LEV"
+      ;;
+    NUM|Numbers)
+      bible_book_name="Numbers"
+      bible_book="NUM"
+      ;;
+    DEU|Deuteronomy)
+      bible_book_name="Deuteronomy"
+      bible_book="DEU"
+      ;;
+    JOS|Joshua)
+      bible_book_name="Joshua"
+      bible_book="JOS"
+      ;;
+    JDG|Judges)
+      bible_book_name="Judges"
+      bible_book="JDG"
+      ;;
+    RUT|Ruth)
+      bible_book_name="Ruth"
+      bible_book="RUT"
+      ;;
+    1SA|"1 samuel")
+      bible_book_name="1 samuel"
+      bible_book="1SA"
+      ;;
+    2SA|"2 samuel")
+      bible_book_name="2 samuel"
+      bible_book="2SA"
+      ;;
+    1KI|"1 Kings")
+      bible_book_name="1 Kings"
+      bible_book="1KI"
+      ;;
+    2KI|"2 Kings")
+      bible_book_name="2 Kings"
+      bible_book="2KI"
+      ;;
+    1CH|"1 Chronicles")
+      bible_book_name="1 Chronicles"
+      bible_book="1CH"
+      ;;
+    2CH|"2 Chronicles")
+      bible_book_name="2 Chronicles"
+      bible_book="2CH"
+      ;;
+    EZR|Ezra)
+      bible_book_name="Ezra"
+      bible_book="EZR"
+      ;;
+    NEH|Nehemiah)
+      bible_book_name="Nehemiah"
+      bible_book="NEH"
+      ;;
+    EST|Esther)
+      bible_book_name="Esther"
+      bible_book="EST"
+      ;;
+    JOB|Job)
+      bible_book_name="Job"
+      bible_book="JOB"
+      ;;
+    PSA|Psalm|psalms)
+      bible_book_name="Psalm"
+      bible_book="PSA"
+      ;;
+    PRO|Proverbs)
+      bible_book_name="Proverbs"
+      bible_book="PRO"
+      ;;
+    ECC|Ecclesiastes)
+      bible_book_name="Ecclesiastes"
+      bible_book="ECC"
+      ;;
+    SNG|"Song of Solomon")
+      bible_book_name="Song of Solomon"
+      bible_book="SNG"
+      ;;
+    ISA|Isaiah)
+      bible_book_name="Isaiah"
+      bible_book="ISA"
+      ;;
+    JER|Jeremiah)
+      bible_book_name="Jeremiah"
+      bible_book="JER"
+      ;;
+    LAM|Lamentations)
+      bible_book_name="Lamentations"
+      bible_book="LAM"
+      ;;
+    EZK|Ezekiel)
+      bible_book_name="Ezekiel"
+      bible_book="EZK"
+      ;;
+    DAN|Daniel)
+      bible_book_name="Daniel"
+      bible_book="DAN"
+      ;;
+    HOS|Hosea)
+      bible_book_name="Hosea"
+      bible_book="HOS"
+      ;;
+    JOL|Joel)
+      bible_book_name="Joel"
+      bible_book="JOL"
+      ;;
+    AMO|Amos)
+      bible_book_name="Amos"
+      bible_book="AMO"
+      ;;
+    OBA|Obadiah)
+      bible_book_name="Obadiah"
+      bible_book="OBA"
+      ;;
+    JON|Jonah)
+      bible_book_name="Jonah"
+      bible_book="JON"
+      ;;
+    MIC|Micah)
+      bible_book_name="Micah"
+      bible_book="MIC"
+      ;;
+    NAM|Nahum)
+      bible_book_name="Nahum"
+      bible_book="NAM"
+      ;;
+    HAB|Habakkuk)
+      bible_book_name="Habakkuk"
+      bible_book="HAB"
+      ;;
+    ZEP|Zephaniah)
+      bible_book_name="Zephaniah"
+      bible_book="ZEP"
+      ;;
+    HAG|Haggai)
+      bible_book_name="Haggai"
+      bible_book="HAG"
+      ;;
+    ZEC|Zechariah)
+      bible_book_name="Zechariah"
+      bible_book="ZEC"
+      ;;
+    MAL|Malachi)
+      bible_book_name="Malachi"
+      bible_book="MAL"
+      ;;
+    MAT|Matthew)
+      bible_book_name="Matthew"
+      bible_book="MAT"
+      ;;
+    MRK|Mark)
+      bible_book_name="Mark"
+      bible_book="MRK"
+      ;;
+    LUK|Luke)
+      bible_book_name="Luke"
+      bible_book="LUK"
+      ;;
+    JHN|John)
+      bible_book_name="John"
+      bible_book="JHN"
+      ;;
+    ACT|Acts)
+      bible_book_name="Acts"
+      bible_book="ACT"
+      ;;
+    ROM|Romans)
+      bible_book_name="Romans"
+      bible_book="ROM"
+      ;;
+    1CO|"1 Corinthians")
+      bible_book_name="1 Corinthians"
+      bible_book="1CO"
+      ;;
+    2CO|"2 Corinthians")
+      bible_book_name="2 Corinthians"
+      bible_book="2CO"
+      ;;
+    GAL|Galatians)
+      bible_book_name="Galatians"
+      bible_book="GAL"
+      ;;
+    EPH|Ephesians)
+      bible_book_name="Ephesians"
+      bible_book="EPH"
+      ;;
+    PHP|Philippians)
+      bible_book_name="Philippians"
+      bible_book="PHP"
+      ;;
+    COL|Colossians)
+      bible_book_name="Colossians"
+      bible_book="COL"
+      ;;
+    1TH|"1 Thessalonians")
+      bible_book_name="1 Thessalonians"
+      bible_book="1TH"
+      ;;
+    2TH|"2 Thessalonians")
+      bible_book_name="2 Thessalonians"
+      bible_book="2TH"
+      ;;
+    1TI|"1 Timothy")
+      bible_book_name="1 Timothy"
+      bible_book="1TI"
+      ;;
+    2TI|"2 Timothy")
+      bible_book_name="2 Timothy"
+      bible_book="2TI"
+      ;;
+    TIT|Titus)
+      bible_book_name="Titus"
+      bible_book="TIT"
+      ;;
+    PHM|Philemon)
+      bible_book_name="Philemon"
+      bible_book="PHM"
+      ;;
+    HEB|Hebrews)
+      bible_book_name="Hebrews"
+      bible_book="HEB"
+      ;;
+    JAS|James)
+      bible_book_name="James"
+      bible_book="JAS"
+      ;;
+    1PE|"1 Peter")
+      bible_book_name="1 Peter"
+      bible_book="1PE"
+      ;;
+    2PE|"2 Peter")
+      bible_book_name="2 Peter"
+      bible_book="2PE"
+      ;;
+    1JN|"1 John")
+      bible_book_name="1 John"
+      bible_book="1JN"
+      ;;
+    2JN|"2 John")
+      bible_book_name="2 John"
+      bible_book="2JN"
+      ;;
+    3JN|"3 John")
+      bible_book_name="3 John"
+      bible_book="3JN"
+      ;;
+    JUD|Jude)
+      bible_book_name="Jude"
+      bible_book="JUD"
+      ;;
+    REV|Revelation)
+      bible_book_name="Revelation"
+      bible_book="REV"
+      ;;
+  esac
 
-  echo -e "${BLUE}${BOLD}Verse of the Day${NC} ${CROSS}"
-  echo -e "${DIM}A daily word of exultation.${NC}"
-  echo -e "${GREEN}"
-  if [[ $(command -v 'convert') ]]
+  if [[ ! $4 == "" ]]
   then
-    convert "$votd_img" -scale 300 six:-
+    version="$4"
   else
-    echo '  _    ______  __________  '
-    echo ' | |  / / __ \/_  __/ __ \ '
-    echo ' | | / / / / / / / / / / / '
-    echo ' | |/ / /_/ / / / / /_/ /  '
-    echo ' |___/\____/ /_/ /_____/   '
+    version="KJV"
   fi
-  echo -e "${NC}"
-  title=$(echo "$votd" | grep -o '.*[[:digit:]]:[[:digit:]]*')
-  description=$(echo "$votd" | sed "s|$title ||g")
-  link=https://www.bible.com/verse-of-the-day
-  ver=NIV
-  if [[ $(command -v 'notify-send') ]]
+
+  case "$version" in
+    NORSK)
+      num=121
+      ;;
+    NB)
+      num=102
+      ;;
+    N78BM)
+      num=30
+      ;;
+    N11BM)
+      num=29
+      ;;
+    ELB)
+      num=115
+      ;;
+    BGO_HVER)
+      num=2321
+      ;;
+    BGO)
+      num=2216
+      ;;
+    KJV)
+      num=1
+      ;;
+    KJVAAE)
+      num=546
+      ;;
+    KJVAE)
+      num=547
+      ;;
+    NKJV)
+      num=114
+      ;;
+    NIV)
+      num=111
+      ;;
+    ESV)
+      num=59
+      ;;
+    NLT)
+      num=116
+      ;;
+    AMP)
+      num=1588
+      ;;
+    GNV)
+      num=2163
+      ;;
+    WBMS)
+      num=2407
+      ;;
+  esac
+
+  if [[ ! $1 == "votd" ]]
   then
-    notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$title\n$link"
-    rm $votd_img_tmp
+    if [[ ! "$chapter" =~ ^[[:digit:]]+$ ]]
+    then
+      echo "Please enter chapter number"
+      exit 0
+    fi
+
+    if [[ ! "$1" =~ ^[[:alpha:]]+$ ]]
+    then
+      echo "$1 does not contain any characters"
+    fi
   fi
-fi
+  get_bible_verse() {
+    # tmpfile
+    tmp=/tmp/bible.tmp
+    # Grab verse and store in tmp file
+    curl --silent https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
+  }
 
-# Strip unwanted symbol from version
-if [[ $version == "N78BM" ]]
-then
+  get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
+
   description=$(
-    echo "$description" | sed "s|¬||g"
+    xmllint --html --xpath '//*[@class="text-text-light dark:text-text-dark text-17 md:text-19 leading-default md:leading-comfy font-aktiv-grotesk font-medium mbe-2"]/text()' $tmp 2>/dev/null |
+    # Strip new lines
+    tr '\n' ' ' |
+    # Strip multiple spaces
+    tr -s ' ' |
+    # Strip trailing space
+    sed 's/.$//'
   )
-fi
 
-# Strip quotes from description if any
-if [[ $description =~ $BQUOTE ]] ||
-[[ $description =~ $EQUOTE ]]
-then
-  BQUOTE=''
-  EQUOTE=''
-fi
-
-if [[ $description == "" ]]
-then
-  description=$(
-    echo "This verse has been omitted from this Bible version,"
-    echo "or a number out of range has been entered."
+  title=$(
+    cat $tmp |
+    xml2 2>/dev/null |
+    grep "meta/@name=twitter:title" --no-group-separator -B1 |
+    sed 's|/html/head/meta/@name=twitter:title||g' |
+    sed 's|/html/head/meta/@content=||g' |
+    sed 's/[ \t]*$//' |
+    grep -o '.*[[:digit:]]:[[:digit:]]*.[[:digit:]]*'
   )
-fi
 
-# Fold description to set width
-description_folded=$(echo "$description" | fold -w ${width} -s)
+  ver=$(
+    cat $tmp |
+    xml2 2>/dev/null |
+    grep "meta/@name=twitter:title" --no-group-separator -B1 |
+    sed 's|/html/head/meta/@name=twitter:title||g' |
+    sed 's|/html/head/meta/@content=||g' |
+    sed 's/[ \t]*$//' |
+    grep -o -P '(?<=\().*(?=\))'
+  )
 
-bible() {
+  link=$(
+    cat $tmp |
+    xml2 2>/dev/null |
+    grep "meta/@name=twitter:url" --no-group-separator -B1 |
+    sed 's|/html/head/meta/@name=twitter:url||g' |
+    sed 's|/html/head/meta/@content=||g' |
+    tr '\n' ' ' |
+    tr -s ' ' |
+    sed 's/.$//'
+  )
+
+  votd=$(
+    curl --silent https://www.bible.com/verse-of-the-day > /tmp/votd.html 2>/dev/null
+    cat /tmp/votd.html |
+    xml2 2>/dev/null |
+    grep "meta/@name=twitter:description" --no-group-separator -B1 |
+    sed 's|/html/head/meta/@name=twitter:description||g' |
+    sed 's|/html/head/meta/@content=||g' |
+    sed 's/[ \t]*$//'
+  )
+
+  votd_img=$(
+    cat /tmp/votd.html |
+    xml2 2>/dev/null |
+    grep "meta/@name=twitter:image" --no-group-separator -B1 |
+    sed 's|/html/head/meta/@name=twitter:image||g' |
+    sed 's|/html/head/meta/@content=||g'
+  )
+
+  if [[ $3 == "listen" ]]
+  then
+    listen_mp3_tmp=/tmp/mp3.html
+
+    listen_mp3_url=$(
+      curl --silent https://www.bible.com/audio-bible/"$num"/"$bible_book"."$chapter"."$version" > $listen_mp3_tmp
+      cat $listen_mp3_tmp |
+      grep -Po "https.*?(?=\")" |
+      grep -i audio-bible-cdn |
+      head -n 1
+    )
+
+    listen_mp3_headline=$(
+      cat $listen_mp3_tmp |
+      grep -Po "headline\":\".*?(?=\")" |
+      sed "s|headline\":\"||g" |
+      head -n 1
+    )
+
+    listen_mp3_transcript=$(
+      cat $listen_mp3_tmp |
+      grep -Po "transcript\":\".*?(?=\")" |
+      sed "s|transcript\":\"||g" |
+      xargs |
+      sed "s|\.n|. \n\n|g"
+    )
+
+    listen_mp3_link=$(
+      cat $listen_mp3_tmp |
+      grep -Po "\"@type\":\"WebPage\",\"@id\":\".*?(?=\")" |
+      sed "s|\"@type\":\"WebPage\",\"@id\":\"||g"
+    )
+
+    vlc "$listen_mp3_url" >/dev/null 2>&1 &
+    rm $listen_mp3_tmp
+  fi
+
+  if [[ $1 == "votd" ]]
+  then
+    votd_img_tmp=/tmp/votd_img.jpg
+
+    if [[ $(command -v 'curl') ]]; then
+      curl -fsSLk "$votd_img" > $votd_img_tmp
+    elif [[ $(command -v 'wget') ]]; then
+      wget -q "$votd_img" -O $votd_img_tmp
+    else
+      echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
+      exit 0
+    fi
+
+    echo -e "${BLUE}${BOLD}Verse of the Day${NC} ${CROSS}"
+    echo -e "${DIM}A daily word of exultation.${NC}"
+    echo -e "${GREEN}"
+    if [[ $(command -v 'convert') ]]
+    then
+      convert "$votd_img" -scale 300 six:-
+    else
+      echo '  _    ______  __________  '
+      echo ' | |  / / __ \/_  __/ __ \ '
+      echo ' | | / / / / / / / / / / / '
+      echo ' | |/ / /_/ / / / / /_/ /  '
+      echo ' |___/\____/ /_/ /_____/   '
+    fi
+    echo -e "${NC}"
+    title=$(echo "$votd" | grep -o '.*[[:digit:]]:[[:digit:]]*')
+    description=$(echo "$votd" | sed "s|$title ||g")
+    link=https://www.bible.com/verse-of-the-day
+    ver=NIV
+    if [[ $(command -v 'notify-send') ]]
+    then
+      notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$title\n$link"
+      rm $votd_img_tmp
+    fi
+  fi
+
+  # Strip unwanted symbol from version
+  if [[ $version == "N78BM" ]]
+  then
+    description=$(
+      echo "$description" | sed "s|¬||g"
+    )
+  fi
+
+  # Strip quotes from description if any
+  if [[ $description =~ $BQUOTE ]] ||
+  [[ $description =~ $EQUOTE ]]
+  then
+    BQUOTE=''
+    EQUOTE=''
+  fi
+
+  if [[ $description == "" ]]
+  then
+    description=$(
+      echo "This verse has been omitted from this Bible version,"
+      echo "or a number out of range has been entered."
+    )
+  fi
+
+  # Fold description to set width
+  description_folded=$(echo "$description" | fold -w ${width} -s)
+
   if [[ $3 == "listen" ]]
   then
     printf "\n"
@@ -668,4 +667,60 @@ bible() {
   fi
 }
 
-bible "$@"
+if [[ ! $1 =~ "-s" ]]
+then
+  bible "$@"
+fi
+
+search() {
+  get_url_id=$(
+    curl -s "https://www.bible.com/search/bible?query=test&version_id=1" |
+    grep -Po "<script src=\"/_next/static/.*?(?>\")" |
+    tail -n 1 |
+    sed "s|<script src=\"/_next/static/||g" |
+    sed "s|/_ssgManifest.js\"||g"
+  )
+  bible_search_tmp=/tmp/bible_search.json
+  query=$(echo "$2" | tr ' ' '+' )
+  curl -s "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&version_id=1&category=bible" | jq -r '.[].results' 2>/dev/null > $bible_search_tmp
+
+  echo ""
+  echo "Search results from bible.com"
+  echo ""
+
+  jq -r '.verses[] | "\(.content), \(.human), \(.version_local_abbreviation)"' "$bible_search_tmp" |
+  while IFS= read -r search_results; do
+    results=$(echo "$search_results" | sed "s|,||g")
+    echo ""
+    echo "$results"
+    echo ""
+    echo "--------------------------------"
+    rm "$bible_search_tmp" 2>/dev/null
+  done
+}
+
+ARGS=()
+while [[ $# -gt 0 ]]
+do
+  case $1 in
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    --search | -s)
+      search "$@"
+      exit 0
+      ;;
+    -*|--*)
+      printf "Unrecognized option: $1\\n\\n"
+      usage
+      exit 1
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+set -- "${ARGS[@]}"
