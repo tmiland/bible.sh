@@ -156,7 +156,13 @@ This is the heritage of the servants of the LORD, and their righteousness is of 
     Dette er arven til Herrens tjenere, og deres rettferdighet kommer fra meg, sier Herren., Dette er arven til Herrens tjenere, og deres rettferdighet tilhører meg, sier Herren.
 ```
 
-## Credits
+### Search
+
+```shell
+bible -s "<keywords>"
+```
+
+### Credits
 - Contains code from these sources:
   * [bible_verse-cli](https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse)
   * Answer on stackoverflow: [Iterate over arguments](https://stackoverflow.com/a/37056727)
