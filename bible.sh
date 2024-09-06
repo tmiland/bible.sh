@@ -39,10 +39,13 @@
 #
 #------------------------------------------------------------------------------#
 ## Uncomment for debugging purpose
-# set -o errexit
-# set -o pipefail
-# set -o nounset
-# set -o xtrace
+if [[ $* =~ "debug" ]]
+then
+set -o errexit
+set -o pipefail
+set -o nounset
+set -o xtrace
+fi
 # Symlink: ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 CROSS='✝'
 BQUOTE='“'
@@ -85,14 +88,26 @@ fi
 width=$((77))
 bible_book_name=
 bible_book=
-book=$1
-chapter=$2
-verse=$3
-version=$4
+book=
+chapter=
+verse=
+version=
 bible() {
+  bible_book_name=
+  bible_book=
+  book=$1
+  chapter=$2
+  verse=$3
+  version=$4
   # Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
   chapter_verse=$(echo "$2" | grep -oE "[0-9]+:[0-9]+")
   verse_range=$(echo "$3" | grep -oE "[0-9]+-[0-9]+")
+  
+  number_book=$(echo "$1" | grep -oE "[0-9](.)[A-Za-z].*")
+  if [ -n "$number_book" ]
+  then
+    book=$(echo "$number_book" | sed "s| ||g")
+  fi
 
   if [ -n "$chapter_verse" ]
   then
@@ -122,71 +137,71 @@ bible() {
   fi
   shopt -s nocasematch
   case "$book" in
-    GEN|Genesis)
+    GEN|Genesis|"1 Mosebok")
       bible_book_name="Genesis"
       bible_book="GEN"
       ;;
-    EXO|Exodus)
+    EXO|Exodus|"2 Mosebok")
       bible_book_name="Exodus"
       bible_book="EXO"
       ;;
-    LEV|Leviticus)
+    LEV|Leviticus|"3 Mosebok")
       bible_book_name="Leviticus"
       bible_book="LEV"
       ;;
-    NUM|Numbers)
+    NUM|Numbers|"4 Mosebok")
       bible_book_name="Numbers"
       bible_book="NUM"
       ;;
-    DEU|Deuteronomy)
+    DEU|Deuteronomy|"5 Mosebok")
       bible_book_name="Deuteronomy"
       bible_book="DEU"
       ;;
-    JOS|Joshua)
+    JOS|Joshua|Josva)
       bible_book_name="Joshua"
       bible_book="JOS"
       ;;
-    JDG|Judges)
+    JDG|Judges|Dommerne)
       bible_book_name="Judges"
       bible_book="JDG"
       ;;
-    RUT|Ruth)
+    RUT|Ruth|Rut)
       bible_book_name="Ruth"
       bible_book="RUT"
       ;;
-    1SA|"1 samuel")
+    1SA|"1 samuel"|"1 Samuelsbok")
       bible_book_name="1 samuel"
       bible_book="1SA"
       ;;
-    2SA|"2 samuel")
+    2SA|"2 samuel"|"2 Samuelsbok")
       bible_book_name="2 samuel"
       bible_book="2SA"
       ;;
-    1KI|"1 Kings")
+    1KI|"1 Kings"|"1 Kongebok")
       bible_book_name="1 Kings"
       bible_book="1KI"
       ;;
-    2KI|"2 Kings")
+    2KI|"2 Kings"|"2 Kongebok")
       bible_book_name="2 Kings"
       bible_book="2KI"
       ;;
-    1CH|"1 Chronicles")
+    1CH|"1 Chronicles"|"1 Krønikebok")
       bible_book_name="1 Chronicles"
       bible_book="1CH"
       ;;
-    2CH|"2 Chronicles")
+    2CH|"2 Chronicles"|"2 Krønikebok")
       bible_book_name="2 Chronicles"
       bible_book="2CH"
       ;;
-    EZR|Ezra)
+    EZR|Ezra|Esra)
       bible_book_name="Ezra"
       bible_book="EZR"
       ;;
-    NEH|Nehemiah)
+    NEH|Nehemiah|Nehemja)
       bible_book_name="Nehemiah"
       bible_book="NEH"
       ;;
-    EST|Esther)
+    EST|Esther|Ester)
       bible_book_name="Esther"
       bible_book="EST"
       ;;
@@ -194,35 +209,35 @@ bible() {
       bible_book_name="Job"
       bible_book="JOB"
       ;;
-    PSA|Psalm|psalms)
+    PSA|Psalm|psalms|Salmene)
       bible_book_name="Psalm"
       bible_book="PSA"
       ;;
-    PRO|Proverbs)
+    PRO|Proverbs|Ordspråkene)
       bible_book_name="Proverbs"
       bible_book="PRO"
       ;;
-    ECC|Ecclesiastes)
+    ECC|Ecclesiastes|Forkynneren)
       bible_book_name="Ecclesiastes"
       bible_book="ECC"
       ;;
-    SNG|"Song of Solomon")
+    SNG|"Song of Solomon"|Høysangen)
       bible_book_name="Song of Solomon"
       bible_book="SNG"
       ;;
-    ISA|Isaiah)
+    ISA|Isaiah|Jesaja)
       bible_book_name="Isaiah"
       bible_book="ISA"
       ;;
-    JER|Jeremiah)
+    JER|Jeremiah|Jeremia)
       bible_book_name="Jeremiah"
       bible_book="JER"
       ;;
-    LAM|Lamentations)
+    LAM|Lamentations|Klagesangene)
       bible_book_name="Lamentations"
       bible_book="LAM"
       ;;
-    EZK|Ezekiel)
+    EZK|Ezekiel|Esekiel)
       bible_book_name="Ezekiel"
       bible_book="EZK"
       ;;
@@ -242,15 +257,15 @@ bible() {
       bible_book_name="Amos"
       bible_book="AMO"
       ;;
-    OBA|Obadiah)
+    OBA|Obadiah|Obadja)
       bible_book_name="Obadiah"
       bible_book="OBA"
       ;;
-    JON|Jonah)
+    JON|Jonah|Jona)
       bible_book_name="Jonah"
       bible_book="JON"
       ;;
-    MIC|Micah)
+    MIC|Micah|Mika)
       bible_book_name="Micah"
       bible_book="MIC"
       ;;
@@ -262,7 +277,7 @@ bible() {
       bible_book_name="Habakkuk"
       bible_book="HAB"
       ;;
-    ZEP|Zephaniah)
+    ZEP|Zephaniah|Sefanja)
       bible_book_name="Zephaniah"
       bible_book="ZEP"
       ;;
@@ -270,75 +285,75 @@ bible() {
       bible_book_name="Haggai"
       bible_book="HAG"
       ;;
-    ZEC|Zechariah)
+    ZEC|Zechariah|Sakarja)
       bible_book_name="Zechariah"
       bible_book="ZEC"
       ;;
-    MAL|Malachi)
+    MAL|Malachi|Malaki)
       bible_book_name="Malachi"
       bible_book="MAL"
       ;;
-    MAT|Matthew)
+    MAT|Matthew|Matteus)
       bible_book_name="Matthew"
       bible_book="MAT"
       ;;
-    MRK|Mark)
+    MRK|Mark|Markus)
       bible_book_name="Mark"
       bible_book="MRK"
       ;;
-    LUK|Luke)
+    LUK|Luke|Lukas)
       bible_book_name="Luke"
       bible_book="LUK"
       ;;
-    JHN|John)
+    JHN|John|Johannes)
       bible_book_name="John"
       bible_book="JHN"
       ;;
-    ACT|Acts)
+    ACT|Acts|"Apostlenes gjerninger")
       bible_book_name="Acts"
       bible_book="ACT"
       ;;
-    ROM|Romans)
+    ROM|Romans|Romerne)
       bible_book_name="Romans"
       bible_book="ROM"
       ;;
-    1CO|"1 Corinthians")
+    1CO|"1 Corinthians"|1Corinthians|"1 korinter"|1korinter)
       bible_book_name="1 Corinthians"
       bible_book="1CO"
       ;;
-    2CO|"2 Corinthians")
+    2CO|"2 Corinthians"|2Corinthians|"2 korinter"|2korinter)
       bible_book_name="2 Corinthians"
       bible_book="2CO"
       ;;
-    GAL|Galatians)
+    GAL|Galatians|Galaterne)
       bible_book_name="Galatians"
       bible_book="GAL"
       ;;
-    EPH|Ephesians)
+    EPH|Ephesians|Efeserne)
       bible_book_name="Ephesians"
       bible_book="EPH"
       ;;
-    PHP|Philippians)
+    PHP|Philippians|Filliperne)
       bible_book_name="Philippians"
       bible_book="PHP"
       ;;
-    COL|Colossians)
+    COL|Colossians|Kolosserne)
       bible_book_name="Colossians"
       bible_book="COL"
       ;;
-    1TH|"1 Thessalonians")
+    1TH|"1 Thessalonians"|1Thessalonians|"1 Tessaloniker"|1Tessaloniker)
       bible_book_name="1 Thessalonians"
       bible_book="1TH"
       ;;
-    2TH|"2 Thessalonians")
+    2TH|"2 Thessalonians"|2Thessalonians|"2 Tessaloniker"|2Tessaloniker)
       bible_book_name="2 Thessalonians"
       bible_book="2TH"
       ;;
-    1TI|"1 Timothy")
+    1TI|"1 Timothy"|1Timothy|"1 Timoteus"|1Timoteus)
       bible_book_name="1 Timothy"
       bible_book="1TI"
       ;;
-    2TI|"2 Timothy")
+    2TI|"2 Timothy"|2Timothy|"2 Timoteus"|2Timoteus)
       bible_book_name="2 Timothy"
       bible_book="2TI"
       ;;
@@ -346,43 +361,43 @@ bible() {
       bible_book_name="Titus"
       bible_book="TIT"
       ;;
-    PHM|Philemon)
+    PHM|Philemon|Filemon)
       bible_book_name="Philemon"
       bible_book="PHM"
       ;;
-    HEB|Hebrews)
+    HEB|Hebrews|Hebreerne)
       bible_book_name="Hebrews"
       bible_book="HEB"
       ;;
-    JAS|James)
+    JAS|James|Jakob)
       bible_book_name="James"
       bible_book="JAS"
       ;;
-    1PE|"1 Peter")
+    1PE|"1 Peter"|1Peter)
       bible_book_name="1 Peter"
       bible_book="1PE"
       ;;
-    2PE|"2 Peter")
+    2PE|"2 Peter"|2Peter)
       bible_book_name="2 Peter"
       bible_book="2PE"
       ;;
-    1JN|"1 John")
+    1JN|"1 John"|1John|"1 Johannes"|1Johannes)
       bible_book_name="1 John"
       bible_book="1JN"
       ;;
-    2JN|"2 John")
+    2JN|"2 John"|2John|"2 Johannes"|2Johannes)
       bible_book_name="2 John"
       bible_book="2JN"
       ;;
-    3JN|"3 John")
+    3JN|"3 John"|3John|"3 Johannes"|3Johannes)
       bible_book_name="3 John"
       bible_book="3JN"
       ;;
-    JUD|Jude)
+    JUD|Jude|Judas)
       bible_book_name="Jude"
       bible_book="JUD"
       ;;
-    REV|Revelation)
+    REV|Revelation|"Johannes' åpenbaring")
       bible_book_name="Revelation"
       bible_book="REV"
       ;;
@@ -457,7 +472,7 @@ bible() {
       exit 0
     fi
 
-    if [[ ! "$1" =~ ^[[:alpha:]]+$ ]]
+    if [[ ! "$1" =~ ^[[:alpha:]]+$ ]] && [ -z "$number_book" ]
     then
       echo "$1 does not contain any characters"
     fi
@@ -673,6 +688,60 @@ then
 fi
 
 search() {
+  version=$3
+  case "$version" in
+    NORSK)
+      num=121
+      ;;
+    NB)
+      num=102
+      ;;
+    N78BM)
+      num=30
+      ;;
+    N11BM)
+      num=29
+      ;;
+    ELB)
+      num=115
+      ;;
+    BGO_HVER)
+      num=2321
+      ;;
+    BGO)
+      num=2216
+      ;;
+    KJV)
+      num=1
+      ;;
+    KJVAAE)
+      num=546
+      ;;
+    KJVAE)
+      num=547
+      ;;
+    NKJV)
+      num=114
+      ;;
+    NIV)
+      num=111
+      ;;
+    ESV)
+      num=59
+      ;;
+    NLT)
+      num=116
+      ;;
+    AMP)
+      num=1588
+      ;;
+    GNV)
+      num=2163
+      ;;
+    WBMS)
+      num=2407
+      ;;
+  esac
   get_url_id=$(
     curl -s "https://www.bible.com/search/bible?query=test&version_id=1" |
     grep -Po "<script src=\"/_next/static/.*?(?>\")" |
@@ -680,21 +749,42 @@ search() {
     sed "s|<script src=\"/_next/static/||g" |
     sed "s|/_ssgManifest.js\"||g"
   )
+  # Source: https://linuxopsys.com/read-json-file-in-shell-script
   bible_search_tmp=/tmp/bible_search.json
   query=$(echo "$2" | tr ' ' '+' )
-  curl -s "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&version_id=1&category=bible" | jq -r '.[].results' 2>/dev/null > $bible_search_tmp
 
+  curl -s "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&version_id=$num&category=bible" |
+  jq -r '.[].results' 2>/dev/null > $bible_search_tmp
+  jqson() {
+    jq -r '.'"$1"'[] | "\(.'"$2"')- \(.'"$3"')- \(.'"$4"')"' "$5"
+  }
   echo ""
   echo "Search results from bible.com"
   echo ""
-
-  jq -r '.verses[] | "\(.content), \(.human), \(.version_local_abbreviation)"' "$bible_search_tmp" |
+  echo "---------------------------------------------------------------------------"
+  jqson verses content human version_local_abbreviation "$bible_search_tmp" |
   while IFS= read -r search_results; do
-    results=$(echo "$search_results" | sed "s|,||g")
+    result1=$(
+      echo "$search_results" |
+      cut -d '-' -f1 |
+      fold -w ${width} -s
+    )
+    result2=$(
+      echo "$search_results" |
+      cut -d '-' -f2 |
+      sed 's/ //'
+    )
+    result3=$(
+      echo "$search_results" |
+      cut -d '-' -f3 |
+      sed 's/ //'
+    )
     echo ""
-    echo "$results"
+    echo "${BLUE}$result2 ($result3)${NC}"
     echo ""
-    echo "--------------------------------"
+    echo "$result1"
+    echo ""
+    echo "---------------------------------------------------------------------------"
     rm "$bible_search_tmp" 2>/dev/null
   done
 }
