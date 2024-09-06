@@ -108,6 +108,8 @@ bible() {
   then
     book=$(echo "$number_book" | sed "s| ||g")
   fi
+  # Check for non-ASCII characters
+  non_ascii=$(echo "$1" | grep -Po "[^\x00-\x7F]")
 
   if [ -n "$chapter_verse" ]
   then
@@ -397,7 +399,7 @@ bible() {
       bible_book_name="Jude"
       bible_book="JUD"
       ;;
-    REV|Revelation|"Johannes' åpenbaring")
+    REV|Revelation|"Johannes åpenbaring")
       bible_book_name="Revelation"
       bible_book="REV"
       ;;
@@ -472,7 +474,7 @@ bible() {
       exit 0
     fi
 
-    if [[ ! "$1" =~ ^[[:alpha:]]+$ ]] && [ -z "$number_book" ]
+    if [[ ! "$1" =~ ^[[:alpha:]]+$ ]] && [[ -z $non_ascii ]] && [ -z "$number_book" ]
     then
       echo "$1 does not contain any characters"
     fi
