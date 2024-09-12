@@ -757,14 +757,14 @@ search() {
 
   curl -s "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&version_id=$num&category=bible" |
   jq -r '.[].results' 2>/dev/null > $bible_search_tmp
-  jqson() {
+  json() {
     jq -r '.'"$1"'[] | "\(.'"$2"')- \(.'"$3"')- \(.'"$4"')"' "$5"
   }
   echo ""
   echo "Search results from bible.com"
   echo ""
   echo "---------------------------------------------------------------------------"
-  jqson verses content human version_local_abbreviation "$bible_search_tmp" |
+  json verses content human version_local_abbreviation "$bible_search_tmp" |
   while IFS= read -r search_results; do
     result1=$(
       echo "$search_results" |
@@ -781,6 +781,13 @@ search() {
       cut -d '-' -f3 |
       sed 's/ //'
     )
+    # Strip unwanted symbol from version
+    if [[ $version == "N78BM" ]]
+    then
+      result1=$(
+        echo "$result1" | sed "s|¬||g"
+      )
+    fi
     echo ""
     echo "${BLUE}$result2 ($result3)${NC}"
     echo ""
