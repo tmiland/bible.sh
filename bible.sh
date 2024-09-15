@@ -41,10 +41,10 @@
 ## Uncomment for debugging purpose
 if [[ $* =~ "debug" ]]
 then
-set -o errexit
-set -o pipefail
-set -o nounset
-set -o xtrace
+  set -o errexit
+  set -o pipefail
+  set -o nounset
+  set -o xtrace
 fi
 # Symlink: ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 CROSS='✝'
@@ -102,7 +102,7 @@ bible() {
   # Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
   chapter_verse=$(echo "$2" | grep -oE "[0-9]+:[0-9]+")
   verse_range=$(echo "$3" | grep -oE "[0-9]+-[0-9]+")
-  
+
   number_book=$(echo "$1" | grep -oE "[0-9](.)[A-Za-z].*")
   if [ -n "$number_book" ]
   then
@@ -579,9 +579,14 @@ bible() {
       grep -Po "\"@type\":\"WebPage\",\"@id\":\".*?(?=\")" |
       sed "s|\"@type\":\"WebPage\",\"@id\":\"||g"
     )
-
-    vlc "$listen_mp3_url" >/dev/null 2>&1 &
-    rm $listen_mp3_tmp
+    if [[ ! $(command -v 'mpv') ]]
+    then
+      echo "mpv player not installed..."
+      exit 0
+    else
+      mpv --player-operation-mode=pseudo-gui "$listen_mp3_url" >/dev/null 2>&1 &
+      rm $listen_mp3_tmp
+    fi
   fi
 
   if [[ $1 == "votd" ]]
