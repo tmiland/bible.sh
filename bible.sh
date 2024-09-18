@@ -758,8 +758,15 @@ search() {
   )
   # Source: https://linuxopsys.com/read-json-file-in-shell-script
   bible_search_tmp=/tmp/bible_search.json
-  query=$(echo "$2" | tr ' ' '+' )
-
+  # Replace space with + sign if one or more spaces in search query
+  # Source: https://stackoverflow.com/a/4449408/2898362
+  if ( echo "$2" | grep -q ' ' )
+  then
+    query=$(echo "$2" | tr ' ' '+' )
+  # If only one word, do nothing
+  else
+    query=$(echo "$2")
+  fi
   curl -s "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&version_id=$num&category=bible" |
   jq -r '.[].results' 2>/dev/null > $bible_search_tmp
   json() {
