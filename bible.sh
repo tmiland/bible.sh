@@ -763,7 +763,7 @@ search() {
   if ( echo "$2" | grep -q ' ' )
   then
     query=$(echo "$2" | tr ' ' '+' )
-  # If only one word, do nothing
+    # If only one word, do nothing
   else
     query=$(echo "$2")
   fi
@@ -796,9 +796,19 @@ search() {
     # Strip unwanted symbol from version
     if [[ $version == "N78BM" ]]
     then
-      result1=$(
-        echo "$result1" | sed "s|¬||g"
-      )
+      result1=${result1//¬/}
+    fi
+    if ( echo "$result1" | grep -q ' .' )
+    then
+      result1=${result1// ./.}
+    fi
+    if ( echo "$result1" | grep -q ' ,' )
+    then
+      result1=${result1// ,/,}
+    fi
+    if ( echo "$result1" | grep -q ' ;' )
+    then
+      result1=${result1// ;/;}
     fi
     echo ""
     echo "${BLUE}$result2 ($result3)${NC}"
