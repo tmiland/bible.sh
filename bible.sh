@@ -750,11 +750,11 @@ search() {
       ;;
   esac
   get_url_id=$(
-    curl -s "https://www.bible.com/search/bible?query=test&version_id=1" |
+    curl -s "https://www.bible.com/search/bible?query=test" |
     grep -Po "<script src=\"/_next/static/.*?(?>\")" |
     tail -n 1 |
     sed "s|<script src=\"/_next/static/||g" |
-    sed "s|/_ssgManifest.js\"||g"
+    sed "s|/.*.js\"||g"
   )
   # Source: https://linuxopsys.com/read-json-file-in-shell-script
   bible_search_tmp=/tmp/bible_search.json
@@ -767,7 +767,14 @@ search() {
   else
     query=$(echo "$2")
   fi
-  curl -s "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&version_id=$num&category=bible" |
+  curl -s \
+      --compressed \
+      -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0' \
+      -H 'Accept: */*' \
+      -H "Cookie: version=$num" \
+      -H 'Pragma: no-cache' \
+      -H 'Cache-Control: no-cache' \
+  "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&category=bible" |
   jq -r '.[].results' 2>/dev/null > $bible_search_tmp
   json() {
     jq -r '.'"$1"'[] | "\(.'"$2"')- \(.'"$3"')- \(.'"$4"')"' "$5"
@@ -817,6 +824,7 @@ search() {
     echo ""
     echo "---------------------------------------------------------------------------"
     rm "$bible_search_tmp" 2>/dev/null
+    sleep 0.1
   done
 }
 
