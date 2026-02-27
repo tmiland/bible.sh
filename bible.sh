@@ -479,73 +479,34 @@ bible() {
       echo "$1 does not contain any characters"
     fi
   fi
-  get_bible_verse() {
-    # tmpfile
-    tmp=/tmp/bible.tmp
-    # Grab verse and store in tmp file
-    curl --silent https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
-  }
+  
+  if [[ ! $1 == "votd" ]]
+    then
+    get_bible_verse() {
+      # tmpfile
+      tmp=/tmp/bible.tmp
+      # Grab verse and store in tmp file
+      curl --silent https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
+    }
 
-  get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
+    get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
 
-  description=$(
-    xmllint --html --xpath '//*[@class="text-text-light dark:text-text-dark text-17 md:text-19 leading-default md:leading-comfy font-aktiv-grotesk font-medium mbe-2"]/text()' $tmp 2>/dev/null |
-    # Strip new lines
-    tr '\n' ' ' |
-    # Strip multiple spaces
-    tr -s ' ' |
-    # Strip trailing space
-    sed 's/.$//'
-  )
+    description=$(
+      cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].content"
+    )
 
-  title=$(
-    cat $tmp |
-    xml2 2>/dev/null |
-    grep "meta/@name=twitter:title" --no-group-separator -B1 |
-    sed 's|/html/head/meta/@name=twitter:title||g' |
-    sed 's|/html/head/meta/@content=||g' |
-    sed 's/[ \t]*$//' |
-    grep -o '.*[[:digit:]]:[[:digit:]]*.[[:digit:]]*'
-  )
+    title=$(
+      cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.version.local_title"
+    )
 
-  ver=$(
-    cat $tmp |
-    xml2 2>/dev/null |
-    grep "meta/@name=twitter:title" --no-group-separator -B1 |
-    sed 's|/html/head/meta/@name=twitter:title||g' |
-    sed 's|/html/head/meta/@content=||g' |
-    sed 's/[ \t]*$//' |
-    grep -o -P '(?<=\().*(?=\))'
-  )
+    ver=$(
+      cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.version.local_abbreviation"
+    )
 
-  link=$(
-    cat $tmp |
-    xml2 2>/dev/null |
-    grep "meta/@name=twitter:url" --no-group-separator -B1 |
-    sed 's|/html/head/meta/@name=twitter:url||g' |
-    sed 's|/html/head/meta/@content=||g' |
-    tr '\n' ' ' |
-    tr -s ' ' |
-    sed 's/.$//'
-  )
-
-  votd=$(
-    curl --silent https://www.bible.com/verse-of-the-day > /tmp/votd.html 2>/dev/null
-    cat /tmp/votd.html |
-    xml2 2>/dev/null |
-    grep "meta/@name=twitter:description" --no-group-separator -B1 |
-    sed 's|/html/head/meta/@name=twitter:description||g' |
-    sed 's|/html/head/meta/@content=||g' |
-    sed 's/[ \t]*$//'
-  )
-
-  votd_img=$(
-    cat /tmp/votd.html |
-    xml2 2>/dev/null |
-    grep "meta/@name=twitter:image" --no-group-separator -B1 |
-    sed 's|/html/head/meta/@name=twitter:image||g' |
-    sed 's|/html/head/meta/@content=||g'
-  )
+    link=$(
+      echo "https://www.bible.com/bible/1/$bible_book.$chapter.$verse.$version"
+    )
+  fi
 
   if [[ $3 == "listen" ]]
   then
@@ -591,6 +552,18 @@ bible() {
 
   if [[ $1 == "votd" ]]
   then
+    votd=$(
+      curl --silent -H "Cookie: version=$num" https://www.bible.com/verse-of-the-day > /tmp/votd.html 2>/dev/null
+      cat /tmp/votd.html | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].content"
+    )
+
+    votd_img=$(
+      cat /tmp/votd.html | grep -Po "<meta property=\"og:image\" content=\"\K(.*?)\"" | tr -d '"'
+    )
+    
+    votd_title=$(
+      cat /tmp/votd.html | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].reference.human"
+    )
     votd_img_tmp=/tmp/votd_img.jpg
 
     if [[ $(command -v 'curl') ]]; then
@@ -607,7 +580,7 @@ bible() {
     echo -e "${GREEN}"
     if [[ $(command -v 'convert') ]]
     then
-      convert "$votd_img" -scale 300 six:-
+      convert "$votd_img" -scale 320 six:-
     else
       echo '  _    ______  __________  '
       echo ' | |  / / __ \/_  __/ __ \ '
@@ -616,8 +589,8 @@ bible() {
       echo ' |___/\____/ /_/ /_____/   '
     fi
     echo -e "${NC}"
-    title=$(echo "$votd" | grep -o '.*[[:digit:]]:[[:digit:]]*')
-    description=$(echo "$votd" | sed "s|$title ||g")
+    title=$votd_title
+    description=$(echo "$votd")
     link=https://www.bible.com/verse-of-the-day
     ver=NIV
     if [[ $(command -v 'notify-send') ]]
