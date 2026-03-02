@@ -722,6 +722,11 @@ search() {
       num=2407
       ;;
   esac
+  
+  if [ -z "$3" ]; then
+    num=1
+  fi
+  
   get_url_id=$(
     curl -s "https://www.bible.com/search/bible?query=test" |
     grep -Po "<script src=\"/_next/static/.*?(?>\")" |
