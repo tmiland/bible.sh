@@ -38,6 +38,9 @@
 # SOFTWARE.
 #
 #------------------------------------------------------------------------------#
+
+audio_folder="$HOME/Audio/Listen Bible"
+
 ## Uncomment for debugging purpose
 if [[ $* =~ "debug" ]]
 then
@@ -479,9 +482,9 @@ bible() {
       echo "$1 does not contain any characters"
     fi
   fi
-  
+
   if [[ ! $1 == "votd" ]]
-    then
+  then
     get_bible_verse() {
       # tmpfile
       tmp=/tmp/bible.tmp
@@ -540,12 +543,33 @@ bible() {
       grep -Po "\"@type\":\"WebPage\",\"@id\":\".*?(?=\")" |
       sed "s|\"@type\":\"WebPage\",\"@id\":\"||g"
     )
-    if [[ ! $(command -v 'mpv') ]]
+
+    listen_mp3_filename=$(
+      echo "$listen_mp3_url" |
+      awk -F '/' '{print $7}' |
+      sed "s|?version_id=1||g"
+    )
+
+    if [[ ! $(command -v 'vlc') ]]
     then
-      echo "mpv player not installed..."
+      echo "vlc player not installed..."
       exit 0
     else
-      mpv --player-operation-mode=pseudo-gui "$listen_mp3_url" >/dev/null 2>&1 &
+      if ! [ -d "$audio_folder"/"$version"/"$bible_book_name" ]; then
+        mkdir -p "$audio_folder"/"$version"/"$bible_book_name"
+      fi
+      cd "$audio_folder/$version/$bible_book_name"
+      curl -sO "$listen_mp3_url"
+      tmp_mp3="$audio_folder/$version/$bible_book_name/$listen_mp3_filename"
+      mp3_title=$(ffmpeg -i "$tmp_mp3" 2>&1 | grep -Po "title\K.*" | tr -d ': ')
+      mp3="$audio_folder"/"$version"/"$bible_book_name"/"$mp3_title".mp3
+      if ! [ -f "$mp3" ]; then
+        mv "$tmp_mp3" "$mp3"
+      else
+        rm "$tmp_mp3"
+      fi
+      cd - >/dev/null 2>&1
+      vlc --play-and-exit "$mp3" >/dev/null 2>&1 &
       rm $listen_mp3_tmp
     fi
   fi
@@ -560,7 +584,7 @@ bible() {
     votd_img=$(
       cat /tmp/votd.html | grep -Po "<meta property=\"og:image\" content=\"\K(.*?)\"" | tr -d '"'
     )
-    
+
     votd_title=$(
       cat /tmp/votd.html | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].reference.human"
     )
@@ -722,20 +746,21 @@ search() {
       num=2407
       ;;
   esac
-  
+
   if [ -z "$3" ]; then
     num=1
   fi
-  
+
   get_url_id=$(
     curl -s "https://www.bible.com/search/bible?query=test" |
-    grep -Po "<script src=\"/_next/static/.*?(?>\")" |
+    grep -Po "<script src=\"/_next/static/chunks/.*?(?>\")" |
     tail -n 1 |
-    sed "s|<script src=\"/_next/static/||g" |
-    sed "s|/.*.js\"||g"
+    sed "s|<script src=\"/_next/static/chunks/||g" |
+    sed "s|/*.js\"||g"
   )
   # Source: https://linuxopsys.com/read-json-file-in-shell-script
-  bible_search_tmp=/tmp/bible_search.json
+  bible_search_tmp=/tmp/bible_search.html
+  bible_search_tmp2=/tmp/youversion_bible_content.tmp
   # Replace space with + sign if one or more spaces in search query
   # Source: https://stackoverflow.com/a/4449408/2898362
   if ( echo "$2" | grep -q ' ' )
@@ -745,38 +770,37 @@ search() {
   else
     query=$(echo "$2")
   fi
+
   curl -s \
-      --compressed \
-      -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0' \
-      -H 'Accept: */*' \
-      -H "Cookie: version=$num" \
-      -H 'Pragma: no-cache' \
-      -H 'Cache-Control: no-cache' \
-  "https://www.bible.com/_next/data/$get_url_id/en/search/bible.json?query=$query&category=bible" |
-  jq -r '.[].results' 2>/dev/null > $bible_search_tmp
-  json() {
-    jq -r '.'"$1"'[] | "\(.'"$2"')- \(.'"$3"')- \(.'"$4"')"' "$5"
-  }
+    --compressed \
+    -H 'Accept: */*' \
+    -H "Cookie: version=$num" \
+    -H 'Pragma: no-cache' \
+    -H 'Cache-Control: no-cache' \
+    "https://www.bible.com/search/bible?query=$query&_rsc=$get_url_id" > "$bible_search_tmp"
   echo ""
   echo "Search results from bible.com"
   echo ""
   echo "---------------------------------------------------------------------------"
-  json verses content human version_local_abbreviation "$bible_search_tmp" |
+  # json verses content human version_local_abbreviation "$bible_search_tmp" |
+  cat "$bible_search_tmp" | grep -Po "<div class=\"flex rounded-0.5 border-small border-gray-10 p-2 dark:border-gray-40\">\K(.*?)</div>" > "$bible_search_tmp2"
   while IFS= read -r search_results; do
     result1=$(
-      echo "$search_results" |
-      cut -d '-' -f1 |
-      fold -w ${width} -s
+      echo "$search_results" \
+        | grep -Po "mbe-1\">\K(.*?)</p>" | sed "s|</p>||g" \
+        | fold -w ${width} -s
     )
     result2=$(
-      echo "$search_results" |
-      cut -d '-' -f2 |
-      sed 's/ //'
+      echo "$search_results" \
+        | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | sed "s|<\!--||g"
     )
     result3=$(
-      echo "$search_results" |
-      cut -d '-' -f3 |
-      sed 's/ //'
+      echo "$search_results" \
+        | grep -Po "\(<\!-- -->\K(.*?)<\!-- -->\)" | sed "s|<\!-- -->)||g"
+    )
+    link=$(
+      echo "$search_results" \
+        | grep -Po "href=\"\K(.*?)\">" | sed "s|\">||g"
     )
     # Strip unwanted symbol from version
     if [[ $version == "N78BM" ]]
@@ -796,14 +820,16 @@ search() {
       result1=${result1// ;/;}
     fi
     echo ""
-    echo "${BLUE}$result2 ($result3)${NC}"
+    echo "\"$result1\""
     echo ""
-    echo "$result1"
+    echo "${BLUE}$result2${NC} ${YELLOW}($result3)${NC}"
+    echo "https://www.bible.com$link"
     echo ""
     echo "---------------------------------------------------------------------------"
     rm "$bible_search_tmp" 2>/dev/null
     sleep 0.1
-  done
+  done < "$bible_search_tmp2"
+  rm "$bible_search_tmp2" 2>/dev/null
 }
 
 ARGS=()
