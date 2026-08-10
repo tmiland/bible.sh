@@ -489,21 +489,30 @@ bible() {
       # tmpfile
       tmp=/tmp/bible.tmp
       # Grab verse and store in tmp file
-      curl --silent https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
+      curl -s \
+        --compressed \
+        -H 'Accept: */*' \
+        -H "Cookie: version=$num" \
+        -H 'Pragma: no-cache' \
+        -H 'Cache-Control: no-cache' \
+        https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
     }
 
     get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
 
     description=$(
-      cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].content"
+      # cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].content"
+      cat $tmp | sed "s|\\\||g"| grep -Po '"property\":\"og:description\",\"content\":\"\K(.*?)\"'
     )
 
     title=$(
-      cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.version.local_title"
+      # cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.version.local_title"
+      cat $tmp | sed "s|\\\||g"| grep -Po '\"property\":\"og:title\",\"content\":\"\K(.*?)\"' | cut -d ' ' -f1,2
     )
 
     ver=$(
-      cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.version.local_abbreviation"
+      # cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.version.local_abbreviation"
+      cat $tmp | sed "s|\\\||g"| grep -Po '\"property\":\"og:title\",\"content\":\"\K(.*?)\"' | cut -d ' ' -f3 | sed "s|[(,)]||g"
     )
 
     link=$(
@@ -818,6 +827,19 @@ search() {
     if ( echo "$result1" | grep -q ' ;' )
     then
       result1=${result1// ;/;}
+    fi
+    if ( echo "$result1" | grep -q '&#x27;' )
+    then
+      result1=${result1//&#x27;/\'}
+    fi
+    if ( echo "$result2" | grep -q '&#x27;' )
+    then
+      result2=${result2//&#x27;/\'}
+    fi
+    if [ -z "$result1" ]; then
+      echo "No result."
+      echo
+      exit 0
     fi
     echo ""
     echo "\"$result1\""
