@@ -502,7 +502,7 @@ bible() {
 
     description=$(
       # cat $tmp | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].content"
-      cat $tmp | sed "s|\\\||g"| grep -Po '"property\":\"og:description\",\"content\":\"\K(.*?)\"'
+      cat $tmp | sed "s|\\\||g"| grep -Po 'content\":\"\K(.*?)\"' | tail -n 1 | sed "s|\"||g"
     )
 
     title=$(
