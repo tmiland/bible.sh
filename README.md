@@ -29,7 +29,20 @@ Desktop notification
 ## Usage
 
 ```shell
-bible Isaiah 54 17 KJV
+Arguments            Example usage
+--help      | -h     Show this help text.
+--bible     | -b     bible -b Isaiah 54:17 KJV
+--search    | -s     bible -s "keyword" KJV
+--votd      | -v     bible -v
+--listen    | -l     bible -l Isaiah 54 KJV
+--compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
+                     or bible -c Isaiah 54:17 [en|no]
+--translate | -t     bible -t Matthew 17:21 greek en
+                     or bible -t Isaiah 54:17 hebrew en
+```
+
+```shell
+bible -b Isaiah 54 17 KJV
 ```
 Output:
 ```shell
@@ -38,7 +51,7 @@ shall rise against thee in judgment thou shalt condemn. This is the heritage
 of the servants of the LORD, and their righteousness is of me, saith the 
 LORD.”
 
-Isaiah 54:1 - (KJV)
+Isaiah 54:17 - (KJV)
 https://www.bible.com/bible/1/ISA.54.17.KJV
 ```
 
@@ -51,33 +64,28 @@ clip() {
 ```
 Usage:
 ```shell
-bible Isaiah 54 17 KJV | clip
+bible -b Isaiah 54 17 KJV | clip
 ```
 
-### Alias to compare versions
+### Compare versions
 
 ```shell
-# Store versions in a variable for use as default
+bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
+```
+or
+```shell
+bible -c Isaiah 54:17 [en|no]
+```
+or
+
+```shell
+# Store versions in a variable for use as argument
 export compare_versions=(KJV NIV NLT NKJV ESV N78BM)
-bible_compare() {
-  for i in "${@:4}"
-  do
-    echo -n "---------------------"
-    printf '\n'
-    bible "$1" "$2" "$3" $i
-    printf '\n'
-    echo -n "---------------------"
-  done
-}
 ```
 
 Usage
 ```shell
-bible_compare Isaiah 54 17 KJV NIV NLT NKJV ESV N78BM
-```
-Or with default variable
-```shell
-bible_compare Isaiah 54 17 $compare_versions
+bible -c Isaiah 54 17 $compare_versions
 ```
 
 Output:
@@ -137,8 +145,14 @@ apt install translate-shell
 ```
 Usage:
 ```shell
-bible Isaiah 54 17 KJV trans | trans :no
+bible -t Isaiah 54:17 hebrew en
 ```
+or
+```shell
+bible -t Matthew 17:21 greek en
+```
+
+
 Output:
 ```shell
 No weapon that is formed against thee shall prosper; and every tongue that shall rise against thee in judgment thou shalt condemn. This is the heritage of the servants of the LORD, and their righteousness is of me, saith the LORD.
