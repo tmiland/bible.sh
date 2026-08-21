@@ -412,10 +412,13 @@ bible() {
   then
     version="$4"
   else
-    version="KJV"
+    version="$3"
   fi
 
   case "$version" in
+    B2024BM)
+      num=4779
+      ;;
     NORSK)
       num=121
       ;;
@@ -703,6 +706,9 @@ fi
 search() {
   version=$3
   case "$version" in
+    B2024BM)
+      num=4779
+      ;;
     NORSK)
       num=121
       ;;
@@ -866,8 +872,8 @@ do
       search "$@"
       exit 0
       ;;
-    -*|--*)
-      printf "Unrecognized option: $1\\n\\n"
+    --* | -*)
+      printf "%s\\n\\n" "Unrecognized option: $1"
       usage
       exit 1
       ;;
