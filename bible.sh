@@ -694,7 +694,7 @@ votd() {
   # votd function
   votd() {
     cat $votd_tmp \
-    | jq -c '.response.data[]' | grep -oP '(?<="'"$1"'":")[^"]*' | head -n 1
+      | jq -c '.response.data[]' | grep -oP '(?<="'"$1"'":")[^"]*' | head -n 1
   }
   # Get content
   votd=$(
@@ -752,7 +752,23 @@ votd() {
   # Send desktop notification
   if [[ $(command -v 'notify-send') ]]
   then
-    notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$chapter_verse ($votd_version)\n$link"
+    message=$(
+      # Disable colors
+      GREEN=''
+      YELLOW=''
+      BLUE=''
+      BOLD=""
+      DIM=""
+      NC=''
+    output "$description" "$chapter_verse" "$votd_version" "$link")
+    # Send notification to desktop
+    notify-send \
+      --hint=string:sound-name:dialog-information \
+      --app-name="Verse of the Day" \
+      --app-icon="dialog-information-symbolic" \
+      --icon=$votd_img_tmp \
+      "Verse of the Day" \
+      "$message"
     rm $votd_img_tmp
   fi
 }
