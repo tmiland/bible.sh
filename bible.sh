@@ -489,8 +489,6 @@ output() {
   echo -n "${BLUE}$4${NC}"
   printf "\n"
   printf "\n"
-  # Credit: https://stackoverflow.com/a/42762743
-  printf '%*s\n' "$width" '' | tr ' ' -
 }
 
 bible() {
@@ -547,7 +545,7 @@ bible() {
   link=$(
     echo "https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
   )
-  
+
   # Strip unwanted symbol from version
   if [[ $version == "N78BM" ]]
   then
@@ -672,18 +670,53 @@ listen() {
 }
 
 votd() {
+  if [ -n "$2" ]; then
+    doy=$2
+  else
+    # Source - https://stackoverflow.com/a/10112611
+    # Posted by Peter.O, modified by community. See post 'Timeline' for change history
+    # Retrieved 2026-08-23, License - CC BY-SA 3.0
+    doy=$(date +%j)
+    doy=$(($doy + 1))
+  fi
+  version=$1
+  lang=en
+  votd_tmp=/tmp/votd.json
+  version_case
+  # Set default version to KJV (1)
+  if [ -z "$version" ]; then
+    version=1
+  fi
+  # Set votd url
+  votd_json_url="https://www.bible.com/api/bible/verse-of-the-day?day=$doy&locale=$lang&versionId=$num"
+  # Send request
+  curl -s "$votd_json_url" > $votd_tmp 2>/dev/null
+  # votd function
+  votd() {
+    cat $votd_tmp \
+    | jq -c '.response.data[]' | grep -oP '(?<="'"$1"'":")[^"]*' | head -n 1
+  }
+  # Get content
   votd=$(
-    curl --silent -H "Cookie: version=$num" https://www.bible.com/verse-of-the-day > /tmp/votd.html 2>/dev/null
-    cat /tmp/votd.html | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].content"
+    votd content
   )
-
+  # Get image url
   votd_img=$(
-    cat /tmp/votd.html | grep -Po "<meta property=\"og:image\" content=\"\K(.*?)\"" | tr -d '"'
+    votd url | grep -oP 'https:.*'
   )
-
+  # Get title
   votd_title=$(
-    cat /tmp/votd.html | grep -Po "<script id=\"__NEXT_DATA__\" type=\"application/json\">\K(.*?)</script>" | sed "s|</script>||g" | jq -r ".props.pageProps.verses[].reference.human"
+    votd human
   )
+  # Get version
+  votd_version=$(
+    votd local_abbreviation
+  )
+  # Get url
+  votd_url=$(
+    votd canonicalUrl
+  )
+  # Set image tmp file
   votd_img_tmp=/tmp/votd_img.jpg
 
   if [[ $(command -v 'curl') ]]; then
@@ -694,36 +727,35 @@ votd() {
     echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
     exit 0
   fi
-
+  # Display output
   echo -e "${BLUE}${BOLD}Verse of the Day${NC} ${CROSS}"
   echo -e "${DIM}A daily word of exultation.${NC}"
-  echo -e "${GREEN}"
+  echo
   if [[ $(command -v 'convert') ]]
   then
-    convert "$votd_img" -scale 320 six:-
+    convert "$votd_img_tmp" -scale 320 six:-
   else
+    echo -e "${GREEN}"
     echo '  _    ______  __________  '
     echo ' | |  / / __ \/_  __/ __ \ '
     echo ' | | / / / / / / / / / / / '
     echo ' | |/ / /_/ / / / / /_/ /  '
     echo ' |___/\____/ /_/ /_____/   '
+    echo -e "${NC}"
   fi
-  echo -e "${NC}"
+  echo
   chapter_verse=$votd_title
   description=$(echo "$votd")
-  link=https://www.bible.com/verse-of-the-day
-  version=NIV
+  link=https://www.bible.com$votd_url
+  # Display output
+  output "$description" "$chapter_verse" "$votd_version" "$link"
+  # Send desktop notification
   if [[ $(command -v 'notify-send') ]]
   then
-    notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$chapter_verse\n$link"
+    notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$chapter_verse ($votd_version)\n$link"
     rm $votd_img_tmp
   fi
 }
-
-# if [[ ! $1 =~ "-s" ]]
-# then
-#   bible "$@"
-# fi
 
 search() {
   num=
@@ -821,6 +853,8 @@ search() {
     fi
     # Display output
     output "$description" "$chapter_verse" "$version" "$link"
+    # Credit: https://stackoverflow.com/a/42762743
+    printf '%*s\n' "$width" '' | tr ' ' -
     # Delete tmp file
     rm "$bible_search_tmp" 2>/dev/null
     sleep 0.1
