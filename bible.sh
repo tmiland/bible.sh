@@ -88,7 +88,7 @@ else
   fi
 fi
 # Maximum column width
-width=$((77))
+width=$((80))
 bible_book_name=
 bible_book=
 book=
@@ -477,6 +477,22 @@ args() {
   fi
 }
 
+output() {
+  # Fold description to set width
+  description=$(echo "$1" | fold -w ${width} -s)
+  printf "\n"
+  echo -n "${BQUOTE}$description${EQUOTE}"
+  echo ""
+  echo ""
+  echo -n "${GREEN}$2${NC} - ${YELLOW}($3)${NC}"
+  echo ""
+  echo -n "${BLUE}$4${NC}"
+  printf "\n"
+  printf "\n"
+  # Credit: https://stackoverflow.com/a/42762743
+  printf '%*s\n' "$width" '' | tr ' ' -
+}
+
 bible() {
   args "$@"
   # echo "book $book chapter $chapter verse $verse version $version"
@@ -517,21 +533,21 @@ bible() {
   get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
 
   description=$(
-    cat $tmp | sed ':a;N;$!ba;s/\\n/ /g' | sed "s|\\\||g"| grep -Po 'usfm\":\[\"'$bible_book'.'$chapter'.'$verse'\"\]\},\"content\":\"\K(.*?)\"' | tail -n 1 | sed "s|\"||g"
+    cat $tmp | sed ':a;N;$!ba;s/\\n/ /g' | sed "s|\\\||g"| grep -Po 'usfm\":\[\"'$bible_book'.'"$chapter"'.'"$verse"'\"\]\},\"content\":\"\K(.*?)\"' | tail -n 1 | sed "s|\"||g"
   )
 
-  title=$(
+  chapter_verse=$(
     cat $tmp | sed "s|\\\||g" | grep -Po '\"property\":\"og:title\",\"content\":\"\K(.*?)\"' | cut -d ' ' -f1,2
   )
 
-  ver=$(
+  version=$(
     cat $tmp | sed "s|\\\||g" | grep -Po '\"property\":\"og:title\",\"content\":\"\K(.*?)\"' | cut -d ' ' -f3 | sed "s|[(,)]||g"
   )
 
   link=$(
     echo "https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
   )
-
+  
   # Strip unwanted symbol from version
   if [[ $version == "N78BM" ]]
   then
@@ -574,15 +590,8 @@ bible() {
     printf "\n"
     printf "\n"
   else
-    printf "\n"
-    echo -n "${BQUOTE}${BLUE}$description_folded${NC}${EQUOTE}"
-    echo ""
-    echo ""
-    echo -n "${GREEN}$title${NC} - ${YELLOW}($ver)${NC}"
-    echo ""
-    echo -n "${DIM}$link${NC}"
-    printf "\n"
-    printf "\n"
+    # Display output
+    output "$description" "$chapter_verse" "$version" "$link"
   fi
 }
 
@@ -700,13 +709,13 @@ votd() {
     echo ' |___/\____/ /_/ /_____/   '
   fi
   echo -e "${NC}"
-  title=$votd_title
+  chapter_verse=$votd_title
   description=$(echo "$votd")
   link=https://www.bible.com/verse-of-the-day
-  ver=NIV
+  version=NIV
   if [[ $(command -v 'notify-send') ]]
   then
-    notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$title\n$link"
+    notify-send -i $votd_img_tmp "Verse of the Day" "$description\n$chapter_verse\n$link"
     rm $votd_img_tmp
   fi
 }
@@ -756,20 +765,22 @@ search() {
   echo ""
   echo "Search results from bible.com"
   echo ""
-  echo "---------------------------------------------------------------------------"
+  # Credit: https://stackoverflow.com/a/42762743
+  printf '%*s\n' "$width" '' | tr ' ' -
+  # echo "-----------------------------------------------------------------------------"
   # json verses content human version_local_abbreviation "$bible_search_tmp" |
   cat "$bible_search_tmp" | grep -Po "<div class=\"flex rounded-0.5 border-small border-gray-10 p-2 dark:border-gray-40\">\K(.*?)</div>" > "$bible_search_tmp2"
   while IFS= read -r search_results; do
-    result1=$(
+    description=$(
       echo "$search_results" \
         | grep -Po "mbe-1\">\K(.*?)</p>" | sed "s|</p>||g" \
         | fold -w ${width} -s
     )
-    result2=$(
+    chapter_verse=$(
       echo "$search_results" \
         | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | sed "s|<\!--||g"
     )
-    result3=$(
+    version=$(
       echo "$search_results" \
         | grep -Po "\(<\!-- -->\K(.*?)<\!-- -->\)" | sed "s|<\!-- -->)||g"
     )
@@ -777,43 +788,40 @@ search() {
       echo "$search_results" \
         | grep -Po "href=\"\K(.*?)\">" | sed "s|\">||g"
     )
+    link="https://www.bible.com$link"
     # Strip unwanted symbol from version
     if [[ $version == "N78BM" ]]
     then
-      result1=${result1//¬/}
+      description=${description//¬/}
     fi
-    if ( echo "$result1" | grep -q ' .' )
+    if ( echo "$description" | grep -q ' .' )
     then
-      result1=${result1// ./.}
+      description=${description// ./.}
     fi
-    if ( echo "$result1" | grep -q ' ,' )
+    if ( echo "$description" | grep -q ' ,' )
     then
-      result1=${result1// ,/,}
+      description=${description// ,/,}
     fi
-    if ( echo "$result1" | grep -q ' ;' )
+    if ( echo "$description" | grep -q ' ;' )
     then
-      result1=${result1// ;/;}
+      description=${description// ;/;}
     fi
-    if ( echo "$result1" | grep -q '&#x27;' )
+    if ( echo "$description" | grep -q '&#x27;' )
     then
-      result1=${result1//&#x27;/\'}
+      description=${description//&#x27;/\'}
     fi
-    if ( echo "$result2" | grep -q '&#x27;' )
+    if ( echo "$chapter_verse" | grep -q '&#x27;' )
     then
-      result2=${result2//&#x27;/\'}
+      chapter_verse=${chapter_verse//&#x27;/\'}
     fi
-    if [ -z "$result1" ]; then
+    if [ -z "$description" ]; then
       echo "No result."
       echo
       exit 0
     fi
-    echo ""
-    echo "\"$result1\""
-    echo ""
-    echo "${BLUE}$result2${NC} ${YELLOW}($result3)${NC}"
-    echo "https://www.bible.com$link"
-    echo ""
-    echo "---------------------------------------------------------------------------"
+    # Display output
+    output "$description" "$chapter_verse" "$version" "$link"
+    # Delete tmp file
     rm "$bible_search_tmp" 2>/dev/null
     sleep 0.1
   done < "$bible_search_tmp2"
