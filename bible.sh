@@ -95,68 +95,91 @@ book=
 chapter=
 verse=
 version=
+listen=
+lang=
+fb_share=
 
 version_case() {
   case "$version" in
     B2024BM)
       num=4779
+      lang=no
       ;;
     NORSK)
       num=121
+      lang=no
       ;;
     NB)
       num=102
+      lang=no
       ;;
     N78BM)
       num=30
+      lang=no
       ;;
     N11BM)
       num=29
+      lang=no
       ;;
     ELB)
       num=115
+      lang=no
       ;;
     BGO_HVER)
       num=2321
+      lang=no
       ;;
     BGO)
       num=2216
+      lang=no
       ;;
     KJV)
       num=1
+      lang=en
       ;;
     KJVAAE)
       num=546
+      lang=en
       ;;
     KJVAE)
       num=547
+      lang=en
       ;;
     NKJV)
       num=114
+      lang=en
       ;;
     NIV)
       num=111
+      lang=en
       ;;
     ESV)
       num=59
+      lang=en
       ;;
     NLT)
       num=116
+      lang=en
       ;;
     AMP)
       num=1588
+      lang=en
       ;;
     GNV)
       num=2163
+      lang=en
       ;;
     WBMS)
       num=2407
+      lang=en
       ;;
     TR1624) # Elzevir textus receptus 1624
       num=182
+      lang=gr
       ;;
     תנ\"ך)
       num=2376
+      lang=heb
       ;;
   esac
 }
@@ -212,7 +235,7 @@ book_case() {
       bible_book_name="2 Kings"
       bible_book="2KI"
       ;;
-    1CH|"1 Chronicles"|"1 Krønikebok")
+    1CH|"1 Chronicles"|1Chronicles|"1 Krønikebok"|1Krønikebok)
       bible_book_name="1 Chronicles"
       bible_book="1CH"
       ;;
@@ -432,48 +455,167 @@ book_case() {
 }
 
 args() {
-  bible_book_name=
-  bible_book=
   book=$1
   chapter=$2
   verse=$3
   version=$4
-  # Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
-
-  chapter_verse=$(echo "$chapter" | grep -oE "[0-9]+:[0-9]+")
-  verse_range=$(echo "$verse" | grep -oE "[0-9]+-[0-9]+")
-
-  number_book=$(echo "$book" | grep -oE "[0-9](.)[A-Za-z].*")
-  if [ -n "$number_book" ]
-  then
-    book=$(echo "$number_book" | sed "s| ||g")
-  fi
-  # Check for non-ASCII characters
-  non_ascii=$(echo "$book" | grep -Po "[^\x00-\x7F]")
-
-  if [ -n "$chapter_verse" ]
-  then
-    chapter=$(echo "$chapter_verse" | cut -d':' -f1)
-    verse=$(echo "$chapter_verse" | cut -d':' -f2)
-    version=$3
-  fi
-
-  if [ -n "$verse_range" ]
-  then
-    verse="$verse_range"
-  else
-    if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
+  verse_range=
+  book_cut_args="-f1"
+  chapter_verse_cut_args="-f2"
+  version_cut_args="-f3"
+  shopt -s nocasematch
+  if [[ "$1" =~ "Johannes"|"Apostlenes" ]] \
+    && [[ "$2" =~ "åpenbaring"|"gjerninger" ]]; then
+    if echo "$3" | grep -oE "[0-9]+:[0-9]+" >/dev/null 2>&1
     then
-      echo "Please enter verse number"
-      exit 0
+      # chapter_verse=$(echo "$chapter" | grep -oE "[0-9]+:[0-9]+")
+      chapter=$(echo "$3" | awk -F':' '{ print $1 }')
+      verse=$(echo "$3"   | awk -F':' '{ print $2 }')
+    fi
+    # book1=$(echo "$1" | awk -F'[^a-zA-Z]+' '{ print $1 }')
+    # book2=$(echo "$2" | awk -F'[^a-zA-Z]+' '{ print $1 }')
+    if [[ "$1 $2" =~ "Johannes åpenbaring" ]]; then
+      book="Revelation"
+    elif [[ "$1 $2" =~ "Apostlenes gjerninger" ]]; then
+      book="Acts"
+    fi
+    version=$4
+    book_cut_args="-f1,2"
+    chapter_verse_cut_args="-f3"
+    version_cut_args="-f4"
+  fi
+
+  # Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
+  # If book contains number with or without space
+  if echo "$1" | grep -oE "[0-9]+\s?" >/dev/null 2>&1; then
+
+    # if echo "$1" | grep -oE "[0-9]+[[:space:]]" >/dev/null 2>&1; then
+
+
+
+    # if ! [[ $1 = *[[:space:]]* ]]; then
+    #   # If book contains number without space
+    #   number_book1=$(echo "$1" | awk -F'[^0-9]+' '{ print $1 }')
+    #   number_book2=$(echo "$1" | awk -F'[^a-zA-Z]+' '{ print $2 }')
+    #   book=$(echo "$number_book1 $number_book2")
+    #   version="$3"
+    # else
+    number_book1=$(echo "$1" | awk -F'[^0-9]+' '{ print $1 }')
+    number_book2=$(echo "$2" | awk -F'[^a-zA-Z]+' '{ print $1 }')
+    book=$(echo "$number_book1 $number_book2")
+    book_cut_args="-f1"
+    chapter_verse_cut_args="-f2,3"
+    version_cut_args="-f4"
+    # fi
+
+    if echo "$3" | grep -oE "[0-9]+" >/dev/null 2>&1 && \
+      echo "$4" | grep -oE "[0-9]+" >/dev/null 2>&1; then
+      # chapter_verse=$(echo "$chapter" | grep -oE "[0-9]+:[0-9]+")
+      chapter="$3"
+      verse="$4"
+      version="$5"
+      # # before :
+      # chapter=${chapter%:*}
+      # # after :
+      # # Credit: https://stackoverflow.com/a/11416230
+      # verse=${chapter#*:}
+    else
+      # chapter_verse=$(echo "$verse" | grep -oE "[0-9]+:[0-9]+")
+      # before :
+      chapter=${3%:*}
+      # after :
+      # Credit: https://stackoverflow.com/a/11416230
+      verse=${3#*:}
+      version="$4"
     fi
   fi
 
-  if [[ ! $book == "" ]]
+  if echo "$2" | grep -oE "[0-9]+:[0-9]+" >/dev/null 2>&1
   then
-    book="$book"
-  else
-    echo "Please enter a valid book name"
+    # chapter_verse=$(echo "$chapter" | grep -oE "[0-9]+:[0-9]+")
+    chapter=$(echo "$2" | awk -F':' '{ print $1 }')
+    verse=$(echo "$2"   | awk -F':' '{ print $2 }')
+    version=$3
+    # # before :
+    # chapter=${chapter%:*}
+    # # after :
+    # # Credit: https://stackoverflow.com/a/11416230
+    # verse=${chapter#*:}
+  fi
+
+  if echo "$verse" | grep -oE "[0-9]+-[0-9]+" >/dev/null 2>&1
+  then
+    verse_range=$(echo "$verse" | grep -oE "[0-9]+-[0-9]+")
+  fi
+  # number_book=$(echo "$book" | grep -oE "[0-9](.)[A-Za-z].*")
+  # if [ -n "$number_book" ]
+  # then
+  #   book=$(echo "$number_book" | sed "s| ||g")
+  # fi
+
+  # Check for non-ASCII characters
+  # non_ascii=$(echo "$book" | grep -Po "[^\x00-\x7F]")
+
+  # if [ -n "$chapter_verse" ]
+  # then
+  #   # before :
+  #   chapter=${chapter_verse%:*}
+  #   # after :
+  #   # Credit: https://stackoverflow.com/a/11416230
+  #   verse=${chapter_verse#*:}
+  #   # chapter=$(echo "$chapter_verse" | cut -d':' -f1)
+  #   # verse=$(echo "$chapter_verse" | cut -d':' -f2)
+  #
+  # fi
+}
+
+get_bible_verse() {
+  # tmpfile
+  tmp=/tmp/bible.tmp
+  # Grab verse and store in tmp file
+  curl -s \
+    --compressed \
+    -H 'Accept: */*' \
+    -H "Cookie: version=$num" \
+    -H 'Pragma: no-cache' \
+    -H 'Cache-Control: no-cache' \
+    https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
+}
+
+output_correction() {
+  # Strip unwanted symbol from version
+  if [[ $version == "N78BM" ]]
+  then
+    description=${description//¬/}
+  fi
+  if ( echo "$description" | grep -q ' .' )
+  then
+    description=${description// ./.}
+  fi
+  if ( echo "$description" | grep -q ' ,' )
+  then
+    description=${description// ,/,}
+  fi
+  if ( echo "$description" | grep -q ' ;' )
+  then
+    description=${description// ;/;}
+  fi
+  if ( echo "$description" | grep -q '&#x27;' )
+  then
+    description=${description//&#x27;/\'}
+  fi
+  if ( echo "$description" | grep -q '– ' )
+  then
+    description=${description//– /}
+  fi
+  if ( echo "$chapter_verse" | grep -q '&#x27;' )
+  then
+    chapter_verse=${chapter_verse//&#x27;/\'}
+  fi
+  if [ -z "$description" ]; then
+    echo "No result."
+    echo
+    exit 0
   fi
 }
 
@@ -484,16 +626,15 @@ output() {
   echo -n "${BQUOTE}$description${EQUOTE}"
   echo ""
   echo ""
-  echo -n "${GREEN}$2${NC} - ${YELLOW}($3)${NC}"
+  echo -n "${GREEN}$2 $3${NC} - ${YELLOW}($4)${NC}"
   echo ""
-  echo -n "${BLUE}$4${NC}"
+  echo -n "${BLUE}$5${NC}"
   printf "\n"
   printf "\n"
 }
 
 bible() {
   args "$@"
-  # echo "book $book chapter $chapter verse $verse version $version"
   book_case
   # if [[ ! $verse == "" ]]
   # then
@@ -515,34 +656,69 @@ bible() {
   #   echo "$book does not contain any characters"
   # fi
 
-  get_bible_verse() {
-    # tmpfile
-    tmp=/tmp/bible.tmp
-    # Grab verse and store in tmp file
-    curl -s \
-      --compressed \
-      -H 'Accept: */*' \
-      -H "Cookie: version=$num" \
-      -H 'Pragma: no-cache' \
-      -H 'Cache-Control: no-cache' \
-      https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
-  }
+  if [ -n "$verse_range" ]
+  then
+    verse="$verse_range"
+  else
+    if [[ ! $3 =~ "listen" ]]
+    then
+      if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
+      then
+        echo "Please enter verse number"
+        exit 0
+      fi
+    fi
+  fi
+
+  if [[ -z $book ]]
+  then
+    echo "Please enter a valid book name"
+  fi
+
+  if [[ -z $num ]]
+  then
+    echo "Please enter a valid version"
+    exit 0
+  fi
 
   get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
 
-  description=$(
-    cat $tmp | sed ':a;N;$!ba;s/\\n/ /g' | sed "s|\\\||g"| grep -Po 'usfm\":\[\"'$bible_book'.'"$chapter"'.'"$verse"'\"\]\},\"content\":\"\K(.*?)\"' | tail -n 1 | sed "s|\"||g"
+  # echo "$bible_book $chapter $verse $version"
+
+  bible_response() {
+    cat "$tmp" \
+      | sed ':a;N;$!ba;s/\\n/ /g' \
+      | sed "s|\\\||g" \
+      | grep -Po '\"twitterCard\":\".*\",\"type\":\"verse\",\"usfm\":\"'"$bible_book"'.'"$chapter"'.'"$1"'\",\"verses\":\[{\K(.*?)\}\}' \
+      | grep -Po ''"$2"'":"\K(.*?)\"' \
+      | sed 's/"*$//g'
+  }
+
+  book=$(
+    bible_response "$verse" human | cut -d ' ' $book_cut_args
   )
 
+  if [ -n "$verse_range" ]
+  then
+    description=$(
+      bible_response "$verse_range" content
+    )
+  else
+    description=$(
+      bible_response "$verse" content
+    )
+  fi
+
   chapter_verse=$(
-    cat $tmp | sed "s|\\\||g" | grep -Po '\"property\":\"og:title\",\"content\":\"\K(.*?)\"' | cut -d ' ' -f1,2
+    bible_response "$verse" human | cut -d ' ' $chapter_verse_cut_args
   )
 
   version=$(
-    cat $tmp | sed "s|\\\||g" | grep -Po '\"property\":\"og:title\",\"content\":\"\K(.*?)\"' | cut -d ' ' -f3 | sed "s|[(,)]||g"
+    bible_response "$verse" local_abbreviation
   )
 
   link=$(
+    # cat $tmp | sed "s|\\\||g"| grep -Po "justify-center\" href=\"\K(.*?)\">" | sed "s|\">||g" | head -n 1
     echo "https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
   )
 
@@ -562,24 +738,27 @@ bible() {
     EQUOTE=''
   fi
 
-  if [[ $description == "" ]]
+  if [[ -z $description ]]
   then
     description=$(
-      echo "This verse has been omitted from this Bible version,"
-      echo "or a number out of range has been entered."
+      if [ $lang = "en" ]; then
+        echo "This verse has been omitted from this Bible version ${YELLOW}($version)${NC},"
+        echo "or a number out of range has been entered."
+      elif [ $lang = "no" ]; then
+        echo "Dette verset er utelatt fra denne bibelversjonen ${YELLOW}($version)${NC},"
+        echo "eller et tall utenfor rekkevidden er tastet inn."
+      fi
     )
   fi
 
   # Fold description to set width
   description_folded=$(echo "$description" | fold -w ${width} -s)
 
-  if [[ $description =~ "omitted" ]]
+  if [[ $description =~ "omitted"|"utelatt" ]]
   then
     printf "\n"
-    echo -n "${BQUOTE}${BLUE}$description_folded${NC}${EQUOTE}"
-    echo ""
-    echo ""
-    echo -n "${GREEN}$book $chapter:$verse${NC} - ${YELLOW}($version)${NC}"
+    echo -n "${BQUOTE}$description_folded${EQUOTE}"
+    printf "\n"
     printf "\n"
   elif [[ "$*" == *"trans"* ]]
   then
@@ -589,13 +768,14 @@ bible() {
     printf "\n"
   else
     # Display output
-    output "$description" "$chapter_verse" "$version" "$link"
+    output_correction
+    output "$description" "$book" "$chapter_verse" "$version" "$link"
   fi
 }
 
 listen() {
   local num=
-  listen_mp3_tmp=/tmp/mp3.html
+  listen_mp3_tmp=/tmp/listen_bible.html
   args "$@"
   version_case
   book_case
@@ -624,9 +804,9 @@ listen() {
   )
 
   listen_mp3_link=$(
-    cat $listen_mp3_tmp |
-    grep -Po "\"@type\":\"WebPage\",\"@id\":\".*?(?=\")" |
-    sed "s|\"@type\":\"WebPage\",\"@id\":\"||g"
+    cat $listen_mp3_tmp \
+      | grep -Po '{"@id":"\K(.*?)","@type":"WebPage"}' \
+      | sed 's|","@type":"WebPage"}||g'
   )
 
   listen_mp3_filename=$(
@@ -654,7 +834,7 @@ listen() {
       rm "$tmp_mp3"
     fi
     cd - >/dev/null 2>&1
-    vlc --play-and-exit "$mp3" >/dev/null 2>&1 &
+    vlc --play-and-exit "$listen_mp3_url" >/dev/null 2>&1 &
     rm $listen_mp3_tmp
   fi
 
@@ -670,6 +850,7 @@ listen() {
 }
 
 votd() {
+
   if [ -n "$2" ]; then
     doy=$2
   else
@@ -679,6 +860,9 @@ votd() {
     doy=$(date +%j)
     doy=$(($doy + 1))
   fi
+  # if [[ $2 == "fb" ]]; then
+  #   fb_share=true
+  # fi
   version=$1
   lang=en
   votd_tmp=/tmp/votd.json
@@ -728,8 +912,13 @@ votd() {
     exit 0
   fi
   # Display output
-  echo -e "${BLUE}${BOLD}Verse of the Day${NC} ${CROSS}"
-  echo -e "${DIM}A daily word of exultation.${NC}"
+  if [ $lang = "en" ]; then
+    echo -e "${BLUE}${BOLD}Verse of the Day${NC} ${CROSS}"
+    echo -e "${DIM}A daily word of exultation.${NC}"
+  elif [ $lang = "no" ]; then
+    echo -e "${BLUE}${BOLD}Dagens vers${NC} ${CROSS}"
+    echo -e "${DIM}Et daglig ord med storlig glede.${NC}"
+  fi
   echo
   if [[ $(command -v 'convert') ]]
   then
@@ -748,7 +937,8 @@ votd() {
   description=$(echo "$votd")
   link=https://www.bible.com$votd_url
   # Display output
-  output "$description" "$chapter_verse" "$votd_version" "$link"
+  output_correction
+  output "$description" "$book" "$chapter_verse" "$votd_version" "$link"
   # Send desktop notification
   if [[ $(command -v 'notify-send') ]]
   then
@@ -760,7 +950,8 @@ votd() {
       BOLD=""
       DIM=""
       NC=''
-    output "$description" "$chapter_verse" "$votd_version" "$link")
+      output_correction
+    output "$description" "$book" "$chapter_verse" "$votd_version" "$link")
     # Send notification to desktop
     notify-send \
       --hint=string:sound-name:dialog-information \
@@ -769,6 +960,9 @@ votd() {
       --icon=$votd_img_tmp \
       "Verse of the Day" \
       "$message"
+    # if $fb_share; then
+    #   xdg-open https://www.facebook.com/sharer/sharer.php?u="$link"
+    # fi
     rm $votd_img_tmp
   fi
 }
@@ -837,38 +1031,9 @@ search() {
         | grep -Po "href=\"\K(.*?)\">" | sed "s|\">||g"
     )
     link="https://www.bible.com$link"
-    # Strip unwanted symbol from version
-    if [[ $version == "N78BM" ]]
-    then
-      description=${description//¬/}
-    fi
-    if ( echo "$description" | grep -q ' .' )
-    then
-      description=${description// ./.}
-    fi
-    if ( echo "$description" | grep -q ' ,' )
-    then
-      description=${description// ,/,}
-    fi
-    if ( echo "$description" | grep -q ' ;' )
-    then
-      description=${description// ;/;}
-    fi
-    if ( echo "$description" | grep -q '&#x27;' )
-    then
-      description=${description//&#x27;/\'}
-    fi
-    if ( echo "$chapter_verse" | grep -q '&#x27;' )
-    then
-      chapter_verse=${chapter_verse//&#x27;/\'}
-    fi
-    if [ -z "$description" ]; then
-      echo "No result."
-      echo
-      exit 0
-    fi
     # Display output
-    output "$description" "$chapter_verse" "$version" "$link"
+    output_correction
+    output "$description" "$book" "$chapter_verse" "$version" "$link"
     # Credit: https://stackoverflow.com/a/42762743
     printf '%*s\n' "$width" '' | tr ' ' -
     # Delete tmp file
@@ -953,6 +1118,7 @@ do
       exit 0
       ;;
     --listen | -l)
+      listen=true
       shift
       listen "$@"
       exit 0
