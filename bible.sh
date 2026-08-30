@@ -850,8 +850,8 @@ listen() {
 }
 
 votd() {
-
-  if [ -n "$2" ]; then
+  if [[ "$2" =~ ^[[:digit:]]+$ ]]
+  then
     doy=$2
   else
     # Source - https://stackoverflow.com/a/10112611
@@ -878,7 +878,10 @@ votd() {
   # votd function
   votd() {
     cat $votd_tmp \
-      | jq -c '.response.data[]' | grep -oP '(?<="'"$1"'":")[^"]*' | head -n 1
+      | jq -c '.response.data[]' \
+      | sed ':a;N;$!ba;s/\\n/ /g' \
+      | grep -oP '(?<="'"$1"'":")[^"]*' \
+      | head -n 1
   }
   # Get content
   votd=$(
@@ -901,12 +904,12 @@ votd() {
     votd canonicalUrl
   )
   # Set image tmp file
-  votd_img_tmp=/tmp/votd_img.jpg
+  votd_img_tmp=$(mktemp)
 
   if [[ $(command -v 'curl') ]]; then
-    curl -fsSLk "$votd_img" > $votd_img_tmp
+    curl -fsSLk "$votd_img" > "$votd_img_tmp"
   elif [[ $(command -v 'wget') ]]; then
-    wget -q "$votd_img" -O $votd_img_tmp
+    wget -q "$votd_img" -O "$votd_img_tmp"
   else
     echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
     exit 0
@@ -933,12 +936,15 @@ votd() {
     echo -e "${NC}"
   fi
   echo
-  chapter_verse=$votd_title
+  book=$(echo "$votd_title" | grep -Po '.* [0-9]+' | sed 's| [0-9].*||g')
+  chapter_verse=$(echo "$votd_title" | grep -Po ' [0-9].*' | sed 's| ||g')
+  # chapter_verse=$votd_title
   description=$(echo "$votd")
+  version=$votd_version
   link=https://www.bible.com$votd_url
   # Display output
   output_correction
-  output "$description" "$book" "$chapter_verse" "$votd_version" "$link"
+  output "$description" "$book" "$chapter_verse" "$version" "$link"
   # Send desktop notification
   if [[ $(command -v 'notify-send') ]]
   then
@@ -957,13 +963,13 @@ votd() {
       --hint=string:sound-name:dialog-information \
       --app-name="Verse of the Day" \
       --app-icon="dialog-information-symbolic" \
-      --icon=$votd_img_tmp \
+      --icon="$votd_img_tmp" \
       "Verse of the Day" \
       "$message"
     # if $fb_share; then
     #   xdg-open https://www.facebook.com/sharer/sharer.php?u="$link"
     # fi
-    rm $votd_img_tmp
+    rm "$votd_img_tmp"
   fi
 }
 
@@ -1011,7 +1017,7 @@ search() {
   printf '%*s\n' "$width" '' | tr ' ' -
   # echo "-----------------------------------------------------------------------------"
   # json verses content human version_local_abbreviation "$bible_search_tmp" |
-  cat "$bible_search_tmp" | grep -Po "<div class=\"flex rounded-0.5 border-small border-gray-10 p-2 dark:border-gray-40\">\K(.*?)</div>" > "$bible_search_tmp2"
+  grep -Po "<div class=\"flex rounded-0.5 border-small border-gray-10 p-2 dark:border-gray-40\">\K(.*?)</div>" "$bible_search_tmp" > "$bible_search_tmp2"
   while IFS= read -r search_results; do
     description=$(
       echo "$search_results" \
@@ -1029,6 +1035,12 @@ search() {
     link=$(
       echo "$search_results" \
         | grep -Po "href=\"\K(.*?)\">" | sed "s|\">||g"
+    )
+    book=$(
+      echo "$chapter_verse" | grep -Po '.* [0-9]+' | sed 's| [0-9].*||g'
+    )
+    chapter_verse=$(
+      echo "$chapter_verse" | grep -Po ' [0-9].*' | sed 's| ||g'
     )
     link="https://www.bible.com$link"
     # Display output
