@@ -98,6 +98,8 @@ version=
 listen=
 lang=
 fb_share=
+compare_versions_no=(B2024BM NORSK NB N78BM N11BM BGO_HVER BGO)
+compare_versions_en=(KJV NKJV NIV NLT ESV)
 
 version_case() {
   case "$version" in
@@ -463,6 +465,15 @@ args() {
   book_cut_args="-f1"
   chapter_verse_cut_args="-f2"
   version_cut_args="-f3"
+  
+  if [[ $4 =~ "no" ]]; then
+    compare_versions=("${compare_versions_no[@]}")
+  elif [[ $4 =~ "en" ]]; then
+    compare_versions=("${compare_versions_en[@]}")
+  else
+    compare_versions=("${@:4}")
+  fi
+  
   shopt -s nocasematch
   if [[ "$1" =~ "Johannes"|"Apostlenes" ]] \
     && [[ "$2" =~ "åpenbaring"|"gjerninger" ]]; then
@@ -514,6 +525,13 @@ args() {
       chapter="$3"
       verse="$4"
       version="$5"
+      if [[ $5 =~ "no" ]]; then
+        compare_versions=("${compare_versions_no[@]}")
+      elif [[ $5 =~ "en" ]]; then
+        compare_versions=("${compare_versions_en[@]}")
+      else
+        compare_versions=("${@:5}")
+      fi
       # # before :
       # chapter=${chapter%:*}
       # # after :
@@ -527,6 +545,13 @@ args() {
       # Credit: https://stackoverflow.com/a/11416230
       verse=${3#*:}
       version="$4"
+      if [[ $4 =~ "no" ]]; then
+        compare_versions=("${compare_versions_no[@]}")
+      elif [[ $4 =~ "en" ]]; then
+        compare_versions=("${compare_versions_en[@]}")
+      else
+        compare_versions=("${@:4}")
+      fi
     fi
   fi
 
@@ -536,6 +561,13 @@ args() {
     chapter=$(echo "$2" | awk -F':' '{ print $1 }')
     verse=$(echo "$2"   | awk -F':' '{ print $2 }')
     version=$3
+    if [[ $3 =~ "no" ]]; then
+      compare_versions=("${compare_versions_no[@]}")
+    elif [[ $3 =~ "en" ]]; then
+      compare_versions=("${compare_versions_en[@]}")
+    else
+      compare_versions=("${@:3}")
+    fi
     # # before :
     # chapter=${chapter%:*}
     # # after :
@@ -1056,19 +1088,12 @@ search() {
 }
 
 compare() {
-  if [[ $4 =~ "no" ]]; then
-    compare_versions=(B2024BM NORSK NB N78BM N11BM BGO_HVER BGO)
-  elif [[ $4 =~ "en" ]]; then
-    compare_versions=(KJV NKJV NIV NLT ESV)
-  else
-    compare_versions=("${@:4}")
-  fi
-
+  args "$@"
   for i in "${compare_versions[@]}"
   do
     echo -n "---------------------"
     printf '\n'
-    bible "$1" "$2" "$3" "$i"
+    bible "$book" "$chapter" "$verse" "$i"
     printf '\n'
     echo -n "---------------------"
   done
