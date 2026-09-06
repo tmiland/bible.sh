@@ -101,6 +101,11 @@ fb_share=
 compare_versions_no=(B2024BM NORSK NB N78BM N11BM BGO_HVER BGO)
 compare_versions_en=(KJV NKJV NIV NLT ESV)
 
+divider_line() {
+  # Credit: https://stackoverflow.com/a/42762743
+  printf '%*s\n' "$width" '' | tr ' ' -
+}
+
 version_case() {
   case "$version" in
     B2024BM)
@@ -465,7 +470,7 @@ args() {
   book_cut_args="-f1"
   chapter_verse_cut_args="-f2"
   version_cut_args="-f3"
-  
+
   if [[ $4 =~ "no" ]]; then
     compare_versions=("${compare_versions_no[@]}")
   elif [[ $4 =~ "en" ]]; then
@@ -473,7 +478,7 @@ args() {
   else
     compare_versions=("${@:4}")
   fi
-  
+
   shopt -s nocasematch
   if [[ "$1" =~ "Johannes"|"Apostlenes" ]] \
     && [[ "$2" =~ "åpenbaring"|"gjerninger" ]]; then
@@ -1045,8 +1050,7 @@ search() {
   echo ""
   echo "Search results from bible.com"
   echo ""
-  # Credit: https://stackoverflow.com/a/42762743
-  printf '%*s\n' "$width" '' | tr ' ' -
+  divider_line
   # echo "-----------------------------------------------------------------------------"
   # json verses content human version_local_abbreviation "$bible_search_tmp" |
   grep -Po "<div class=\"flex rounded-0.5 border-small border-gray-10 p-2 dark:border-gray-40\">\K(.*?)</div>" "$bible_search_tmp" > "$bible_search_tmp2"
@@ -1078,8 +1082,7 @@ search() {
     # Display output
     output_correction
     output "$description" "$book" "$chapter_verse" "$version" "$link"
-    # Credit: https://stackoverflow.com/a/42762743
-    printf '%*s\n' "$width" '' | tr ' ' -
+    divider_line
     # Delete tmp file
     rm "$bible_search_tmp" 2>/dev/null
     sleep 0.1
@@ -1091,11 +1094,11 @@ compare() {
   args "$@"
   for i in "${compare_versions[@]}"
   do
-    echo -n "---------------------"
     printf '\n'
     bible "$book" "$chapter" "$verse" "$i"
     printf '\n'
-    echo -n "---------------------"
+    divider_line
+    sleep 0.3
   done
 }
 
