@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `--translate` / `-t` now supports space-separated references in addition to
+  the colon form (`bible -t Forkynneren 12 13 greek no` /
+  `bible -t Matthew 17:21 greek en`), and checks for the correct binary name:
+  the `translate-shell` package installs `trans`.
+- Piped output no longer leaks literal `\033[...]` color escapes. When stdout
+  is not a terminal, colors are now disabled instead of falling back to
+  backslash sequences that `echo` (without `-e`) prints verbatim — this also
+  keeps the text fed to `trans` during translation clean.
+
+### Changed
+- Removed the WIP marker from README.md.
+- Documented the testament coverage of the translate source versions in the
+  help text: `greek` maps to TR1624 (New Testament only) and `hebrew` covers
+  the Old Testament only, so e.g. `bible -t Forkynneren 12:13 greek no` can
+  never resolve (Ecclesiastes is OT); NT verses such as
+  `bible -t Filemon 1:6 greek no` work.
+
 ## [1.0.0] - 2026-09-06
 
 ### Added
@@ -45,6 +65,6 @@ All notable changes to this project are documented in this file.
 ## Credits
 
 The argument-parsing refactor, inline flag handling, temp-file cleanup,
-and the verse-of-the-day API fix in this release were contributed by
+verse-of-the-day API fix, and translate command fixes were contributed by
 [opencode](https://opencode.ai), an AI coding assistant, working with the
 maintainer.
