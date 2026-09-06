@@ -618,7 +618,12 @@ get_bible_verse() {
     -H "Cookie: version=$num" \
     -H 'Pragma: no-cache' \
     -H 'Cache-Control: no-cache' \
-    https://www.bible.com/bible/"$num"/"$1"."$2"."$3"."$4" > $tmp
+    "https://www.bible.com/bible/$num/$1.$2.$3.$4" > "$tmp"
+  if [[ ! -s "$tmp" ]]; then
+    echo "No result."
+    echo
+    exit 0
+  fi
 }
 
 output_correction() {
@@ -627,30 +632,12 @@ output_correction() {
   then
     description=${description//¬/}
   fi
-  if ( echo "$description" | grep -q ' .' )
-  then
-    description=${description// ./.}
-  fi
-  if ( echo "$description" | grep -q ' ,' )
-  then
-    description=${description// ,/,}
-  fi
-  if ( echo "$description" | grep -q ' ;' )
-  then
-    description=${description// ;/;}
-  fi
-  if ( echo "$description" | grep -q '&#x27;' )
-  then
-    description=${description//&#x27;/\'}
-  fi
-  if ( echo "$description" | grep -q '– ' )
-  then
-    description=${description//– /}
-  fi
-  if ( echo "$chapter_verse" | grep -q '&#x27;' )
-  then
-    chapter_verse=${chapter_verse//&#x27;/\'}
-  fi
+  description=${description// ./.}
+  description=${description// ,/,}
+  description=${description// ;/;}
+  description=${description//&#x27;/\'}
+  description=${description//– /}
+  chapter_verse=${chapter_verse//&#x27;/\'}
   if [ -z "$description" ]; then
     echo "No result."
     echo
@@ -688,17 +675,6 @@ bible() {
 
   version_case
 
-  # if [[ ! "$chapter" =~ ^[[:digit:]]+$ ]]
-  # then
-  #   echo "Please enter chapter number"
-  #   exit 0
-  # fi
-
-  # if [[ ! "$book" =~ ^[[:alpha:]]+$ ]] && [[ -z $non_ascii ]] && [ -z "$number_book" ]
-  # then
-  #   echo "$book does not contain any characters"
-  # fi
-
   if [ -n "$verse_range" ]
   then
     verse="$verse_range"
@@ -723,11 +699,8 @@ bible() {
 
   get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
 
-  # echo "$bible_book $chapter $verse $version"
-
   bible_response() {
-    cat "$tmp" \
-      | sed ':a;N;$!ba;s/\\n/ /g' \
+    sed ':a;N;$!ba;s/\\n/ /g' "$tmp" \
       | sed "s|\\\||g" \
       | grep -Po '\"twitterCard\":\".*\",\"type\":\"verse\",\"usfm\":\"'"$bible_book"'.'"$chapter"'.'"$1"'\",\"verses\":\[{\K(.*?)\}\}' \
       | grep -Po ''"$2"'":"\K(.*?)\"' \
@@ -766,17 +739,12 @@ bible() {
     version="$page_version"
   fi
 
-  link=$(
-    # cat $tmp | sed "s|\\\||g"| grep -Po "justify-center\" href=\"\K(.*?)\">" | sed "s|\">||g" | head -n 1
-    echo "https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
-  )
+  link="https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
 
   # Strip unwanted symbol from version
   if [[ $version == "N78BM" ]]
   then
-    description=$(
-      echo "$description" | sed "s|¬||g"
-    )
+    description=${description//¬/}
   fi
 
   # Strip quotes from description if any
@@ -809,12 +777,6 @@ bible() {
     echo -n "${BQUOTE}$description_folded${EQUOTE}"
     printf "\n"
     printf "\n"
-  elif [[ "$*" == *"trans"* ]]
-  then
-    printf "\n"
-    echo -n "$description"
-    printf "\n"
-    printf "\n"
   else
     # Display output
     output_correction
@@ -831,32 +793,28 @@ listen() {
   book_case
 
   listen_mp3_url=$(
-    curl --silent https://www.bible.com/audio-bible/"$num"/"$bible_book"."$chapter"."$version" > $listen_mp3_tmp
-    cat $listen_mp3_tmp |
-    grep -Po "https.*?(?=\")" |
+    curl --silent https://www.bible.com/audio-bible/"$num"/"$bible_book"."$chapter"."$version" > "$listen_mp3_tmp"
+    grep -Po "https.*?(?=\")" "$listen_mp3_tmp" |
     grep -i audio-bible-cdn |
     head -n 1
   )
 
   listen_mp3_headline=$(
-    cat $listen_mp3_tmp |
-    grep -Po "headline\":\".*?(?=\")" |
+    grep -Po "headline\":\".*?(?=\")" "$listen_mp3_tmp" |
     sed "s|headline\":\"||g" |
     head -n 1
   )
 
   listen_mp3_transcript=$(
-    cat $listen_mp3_tmp |
-    grep -Po "transcript\":\".*?(?=\")" |
+    grep -Po "transcript\":\".*?(?=\")" "$listen_mp3_tmp" |
     sed "s|transcript\":\"||g" |
     xargs |
     sed "s|\.n|. \n\n|g"
   )
 
   listen_mp3_link=$(
-    cat $listen_mp3_tmp \
-      | grep -Po '{"@id":"\K(.*?)","@type":"WebPage"}' \
-      | sed 's|","@type":"WebPage"}||g'
+    grep -Po '{"@id":"\K(.*?)","@type":"WebPage"}' "$listen_mp3_tmp" |
+      sed 's|","@type":"WebPage"}||g'
   )
 
   listen_mp3_filename=$(
@@ -885,7 +843,7 @@ listen() {
     fi
     cd - >/dev/null 2>&1
     vlc --play-and-exit "$listen_mp3_url" >/dev/null 2>&1 &
-    rm $listen_mp3_tmp
+    rm "$listen_mp3_tmp"
   fi
 
   printf "\n"
@@ -910,61 +868,46 @@ votd() {
     doy=$(date +%j)
     doy=$(($doy + 1))
   fi
-  # if [[ $2 == "fb" ]]; then
-  #   fb_share=true
-  # fi
   version=$1
   lang=en
+  # Set default version to KJV (1) before resolving the version id
+  if [ -z "$version" ]; then
+    version="KJV"
+  fi
   votd_tmp=$(mktemp)
   tmp_files+=("$votd_tmp")
   version_case
-  # Set default version to KJV (1)
-  if [ -z "$version" ]; then
-    version=1
-  fi
   # Set votd url
   votd_json_url="https://www.bible.com/api/bible/verse-of-the-day?day=$doy&locale=$lang&versionId=$num"
   # Send request
-  curl -s "$votd_json_url" > $votd_tmp 2>/dev/null
-  # votd function
-  votd() {
-    cat $votd_tmp \
-      | jq -c '.response.data[]' \
-      | sed ':a;N;$!ba;s/\\n/ /g' \
-      | grep -oP '(?<="'"$1"'":")[^"]*' \
-      | head -n 1
-  }
-  # Get content
-  votd=$(
-    votd content
-  )
-  # Get image url
-  votd_img=$(
-    votd url | grep -oP 'https:.*'
-  )
-  # Get title
-  votd_title=$(
-    votd human
-  )
-  # Get version
-  votd_version=$(
-    votd local_abbreviation
-  )
-  # Get url
-  votd_url=$(
-    votd canonicalUrl
-  )
+  curl -s "$votd_json_url" > "$votd_tmp" 2>/dev/null
+  if [[ ! $(command -v 'jq') ]]; then
+    echo "jq not installed..."
+    exit 0
+  fi
+  # Parse the VOTD response (bible.com sends it in .response.data.arrayOfVerses)
+  votd_content=$(jq -r '.response.data.arrayOfVerses[0].verses[0].content // empty' "$votd_tmp" | tr '\n' ' ')
+  votd_title=$(jq -r '.response.data.arrayOfVerses[0].verses[0].reference.human // empty' "$votd_tmp")
+  votd_version=$(jq -r '.response.data.arrayOfVerses[0].local_abbreviation // empty' "$votd_tmp")
+  votd_url=$(jq -r '.response.data.arrayOfVerses[0].canonicalUrl // empty' "$votd_tmp")
+  votd_img=$(jq -r '.response.data.arrayOfVerses[0].images.images[0].renditions | max_by(.width) | .url // empty' "$votd_tmp" | grep -oP 'https:.*')
+  if [[ -z "$votd_content" || -z "$votd_title" ]]; then
+    echo "No verse of the day available."
+    exit 0
+  fi
   # Set image tmp file
   votd_img_tmp=$(mktemp)
   tmp_files+=("$votd_img_tmp")
 
-  if [[ $(command -v 'curl') ]]; then
-    curl -fsSLk "$votd_img" > "$votd_img_tmp"
-  elif [[ $(command -v 'wget') ]]; then
-    wget -q "$votd_img" -O "$votd_img_tmp"
-  else
-    echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
-    exit 0
+  if [[ -n "$votd_img" ]]; then
+    if [[ $(command -v 'curl') ]]; then
+      curl -fsSLk "$votd_img" > "$votd_img_tmp"
+    elif [[ $(command -v 'wget') ]]; then
+      wget -q "$votd_img" -O "$votd_img_tmp"
+    else
+      echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
+      exit 0
+    fi
   fi
   # Display output
   if [ $lang = "en" ]; then
@@ -975,23 +918,25 @@ votd() {
     echo -e "${DIM}Et daglig ord med storlig glede.${NC}"
   fi
   echo
-  if [[ $(command -v 'convert') ]]
+  if [[ -n "$votd_img" ]]
   then
-    convert "$votd_img_tmp" -scale 320 six:-
-  else
-    echo -e "${GREEN}"
-    echo '  _    ______  __________  '
-    echo ' | |  / / __ \/_  __/ __ \ '
-    echo ' | | / / / / / / / / / / / '
-    echo ' | |/ / /_/ / / / / /_/ /  '
-    echo ' |___/\____/ /_/ /_____/   '
-    echo -e "${NC}"
+    if [[ $(command -v 'convert') ]]
+    then
+      convert "$votd_img_tmp" -scale 320 six:-
+    else
+      echo -e "${GREEN}"
+      echo '  _    ______  __________  '
+      echo ' | |  / / __ \/_  __/ __ \ '
+      echo ' | | / / / / / / / / / / / '
+      echo ' | |/ / /_/ / / / / /_/ /  '
+      echo ' |___/\____/ /_/ /_____/   '
+      echo -e "${NC}"
+    fi
+    echo
   fi
-  echo
   book=$(echo "$votd_title" | grep -Po '.* [0-9]+' | sed 's| [0-9].*||g')
   chapter_verse=$(echo "$votd_title" | grep -Po ' [0-9].*' | sed 's| ||g')
-  # chapter_verse=$votd_title
-  description=$(echo "$votd")
+  description=$votd_content
   version=$votd_version
   link=https://www.bible.com$votd_url
   # Display output
@@ -1018,9 +963,6 @@ votd() {
       --icon="$votd_img_tmp" \
       "Verse of the Day" \
       "$message"
-    # if $fb_share; then
-    #   xdg-open https://www.facebook.com/sharer/sharer.php?u="$link"
-    # fi
     rm "$votd_img_tmp"
   fi
 }
@@ -1047,14 +989,9 @@ search() {
   tmp_files+=("$bible_search_tmp")
   bible_search_tmp2=$(mktemp)
   tmp_files+=("$bible_search_tmp2")
-  # Replace space with + sign if one or more spaces in search query
-  # Source: https://stackoverflow.com/a/4449408/2898362
-  if ( echo "$query" | grep -q ' ' )
-  then
-    query=$(echo "$query" | tr ' ' '+' )
-    # If only one word, do nothing
-  else
-    query=$(echo "$query")
+  # URL-encode the search query by replacing spaces with + signs
+  if [[ "$query" == *" "* ]]; then
+    query=${query// /+}
   fi
 
   curl -s \
