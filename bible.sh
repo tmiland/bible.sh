@@ -462,148 +462,119 @@ book_case() {
 }
 
 args() {
-  book=$1
-  chapter=$2
-  verse=$3
-  version=$4
+  local words=("$@")
+  local i tok cv prev="" bookpart=""
+  local ref_idx=-1 vers_idx=0
+
+  book=
+  chapter=
+  verse=
   verse_range=
-  book_cut_args="-f1"
-  chapter_verse_cut_args="-f2"
-  version_cut_args="-f3"
+  version=
+  compare_versions=()
 
-  if [[ $4 =~ "no" ]]; then
-    compare_versions=("${compare_versions_no[@]}")
-  elif [[ $4 =~ "en" ]]; then
-    compare_versions=("${compare_versions_en[@]}")
+  # The reference token is the one that looks like "N", "N:M" or "N:M1-M2",
+  # possibly joined to the book name ("Psalm 23"). Versions never contain
+  # digits, so scan from the end and take the last matching token.
+  # A chapter and verse may also be given without a colon as two adjacent
+  # bare numbers ("Isaiah 54 17").
+  for (( i=${#words[@]}-1; i>=0; i-- )); do
+    tok="${words[$i]}"
+    if [[ "$tok" =~ ^[0-9]+(:[0-9]+(-[0-9]+)?|-[0-9]+)?$ ]]; then
+      ref_idx=$i
+      cv="$tok"
+      bookpart=""
+      # Adjacent bare number before it is the chapter, this one the verse
+      if (( i > 0 )) && [[ "${words[$((i-1))]}" =~ ^[0-9]+$ ]] \
+        && [[ "$cv" != *:* ]]
+      then
+        prev="${words[$((i-1))]}"
+        ref_idx=$((i-1))
+      fi
+      break
+    elif [[ "$tok" =~ ^(.+)\ ([0-9]+)\ ([0-9]+(-[0-9]+)?)$ ]]; then
+      # "Book N M" or "Book N M-M" as a single token (no colon)
+      ref_idx=$i
+      cv="${BASH_REMATCH[3]}"
+      prev="${BASH_REMATCH[2]}"
+      bookpart="${BASH_REMATCH[1]}"
+      break
+    elif [[ "$tok" =~ ^(.+)\ ([0-9]+(:[0-9]+(-[0-9]+)?|-[0-9]+)?)$ ]]; then
+      ref_idx=$i
+      cv="${BASH_REMATCH[2]}"
+      bookpart="${BASH_REMATCH[1]}"
+      break
+    fi
+  done
+
+  if (( ref_idx >= 0 )); then
+    if (( ref_idx > 0 )); then
+      book=$(printf '%s ' "${words[@]:0:ref_idx}")
+      book=${book% }
+    fi
+    book+="$bookpart"
+    if [[ "$cv" =~ ^([0-9]+):([0-9]+-[0-9]+)$ ]]; then
+      chapter="${BASH_REMATCH[1]}"
+      verse="${BASH_REMATCH[2]}"
+      verse_range="$verse"
+    elif [[ "$cv" =~ ^([0-9]+):([0-9]+)$ ]]; then
+      chapter="${BASH_REMATCH[1]}"
+      verse="${BASH_REMATCH[2]}"
+    elif [[ -n "$prev" ]]; then
+      chapter="$prev"
+      verse="$cv"
+      if [[ "$verse" =~ ^[0-9]+-[0-9]+$ ]]; then
+        verse_range="$verse"
+      fi
+    elif [[ "$cv" == *-* ]]; then
+      chapter="${cv%-*}"
+      verse="${cv#*-}"
+      verse_range="$verse"
+    else
+      chapter="$cv"
+    fi
+    # The reference may span two tokens (chapter + verse); versions follow
+    if (( ref_idx == i - 1 )); then
+      vers_idx=$((i + 1))
+    else
+      vers_idx=$((ref_idx + 1))
+    fi
+    words=("${words[@]:vers_idx}")
   else
-    compare_versions=("${@:4}")
+    if [[ ${#words[@]} -gt 0 ]]; then
+      book=$(printf '%s ' "${words[@]}")
+      book=${book% }
+    fi
+    words=()
   fi
 
-  shopt -s nocasematch
-  if [[ "$1" =~ "Johannes"|"Apostlenes" ]] \
-    && [[ "$2" =~ "åpenbaring"|"gjerninger" ]]; then
-    if echo "$3" | grep -oE "[0-9]+:[0-9]+" >/dev/null 2>&1
-    then
-      # chapter_verse=$(echo "$chapter" | grep -oE "[0-9]+:[0-9]+")
-      chapter=$(echo "$3" | awk -F':' '{ print $1 }')
-      verse=$(echo "$3"   | awk -F':' '{ print $2 }')
-    fi
-    # book1=$(echo "$1" | awk -F'[^a-zA-Z]+' '{ print $1 }')
-    # book2=$(echo "$2" | awk -F'[^a-zA-Z]+' '{ print $1 }')
-    if [[ "$1 $2" =~ "Johannes åpenbaring" ]]; then
-      book="Revelation"
-    elif [[ "$1 $2" =~ "Apostlenes gjerninger" ]]; then
-      book="Acts"
-    fi
-    version=$4
-    book_cut_args="-f1,2"
-    chapter_verse_cut_args="-f3"
-    version_cut_args="-f4"
+  # Normalize a no-space book number ("2Timoteus" -> "2 Timoteus") so that
+  # book_case only ever needs the spaced form
+  if [[ "$book" =~ ^([0-9]+)([A-Za-z].*)$ ]]; then
+    book="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
   fi
 
-  # Source: https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse
-  # If book contains number with or without space
-  if echo "$1" | grep -oE "[0-9]+\s?" >/dev/null 2>&1; then
-
-    # if echo "$1" | grep -oE "[0-9]+[[:space:]]" >/dev/null 2>&1; then
-
-
-
-    # if ! [[ $1 = *[[:space:]]* ]]; then
-    #   # If book contains number without space
-    #   number_book1=$(echo "$1" | awk -F'[^0-9]+' '{ print $1 }')
-    #   number_book2=$(echo "$1" | awk -F'[^a-zA-Z]+' '{ print $2 }')
-    #   book=$(echo "$number_book1 $number_book2")
-    #   version="$3"
-    # else
-    number_book1=$(echo "$1" | awk -F'[^0-9]+' '{ print $1 }')
-    number_book2=$(echo "$2" | awk -F'[^a-zA-Z]+' '{ print $1 }')
-    book=$(echo "$number_book1 $number_book2")
-    book_cut_args="-f1"
-    chapter_verse_cut_args="-f2,3"
-    version_cut_args="-f4"
-    # fi
-
-    if echo "$3" | grep -oE "[0-9]+" >/dev/null 2>&1 && \
-      echo "$4" | grep -oE "[0-9]+" >/dev/null 2>&1; then
-      # chapter_verse=$(echo "$chapter" | grep -oE "[0-9]+:[0-9]+")
-      chapter="$3"
-      verse="$4"
-      version="$5"
-      if [[ $5 =~ "no" ]]; then
+  # Remaining args are the version(s), or a language shortcut (no/en)
+  if [[ ${#words[@]} -gt 0 ]]; then
+    if [[ ${#words[@]} -eq 1 ]]; then
+      if [[ "${words[0]}" == "no" ]]; then
+        version="no"
         compare_versions=("${compare_versions_no[@]}")
-      elif [[ $5 =~ "en" ]]; then
+        return
+      elif [[ "${words[0]}" == "en" ]]; then
+        version="en"
         compare_versions=("${compare_versions_en[@]}")
-      else
-        compare_versions=("${@:5}")
-      fi
-      # # before :
-      # chapter=${chapter%:*}
-      # # after :
-      # # Credit: https://stackoverflow.com/a/11416230
-      # verse=${chapter#*:}
-    else
-      # chapter_verse=$(echo "$verse" | grep -oE "[0-9]+:[0-9]+")
-      # before :
-      chapter=${3%:*}
-      # after :
-      # Credit: https://stackoverflow.com/a/11416230
-      verse=${3#*:}
-      version="$4"
-      if [[ $4 =~ "no" ]]; then
-        compare_versions=("${compare_versions_no[@]}")
-      elif [[ $4 =~ "en" ]]; then
-        compare_versions=("${compare_versions_en[@]}")
-      else
-        compare_versions=("${@:4}")
+        return
       fi
     fi
+    version="${words[0]}"
+    compare_versions=("${words[@]}")
   fi
 
-  if echo "$2" | grep -oE "[0-9]+:[0-9]+" >/dev/null 2>&1
-  then
-    # chapter_verse=$(echo "$chapter" | grep -oE "[0-9]+:[0-9]+")
-    chapter=$(echo "$2" | awk -F':' '{ print $1 }')
-    verse=$(echo "$2"   | awk -F':' '{ print $2 }')
-    version=$3
-    if [[ $3 =~ "no" ]]; then
-      compare_versions=("${compare_versions_no[@]}")
-    elif [[ $3 =~ "en" ]]; then
-      compare_versions=("${compare_versions_en[@]}")
-    else
-      compare_versions=("${@:3}")
-    fi
-    # # before :
-    # chapter=${chapter%:*}
-    # # after :
-    # # Credit: https://stackoverflow.com/a/11416230
-    # verse=${chapter#*:}
+  # Default to KJV when no version was given
+  if [[ -z "$version" ]]; then
+    version="KJV"
   fi
-
-  if echo "$verse" | grep -oE "[0-9]+-[0-9]+" >/dev/null 2>&1
-  then
-    verse_range=$(echo "$verse" | grep -oE "[0-9]+-[0-9]+")
-  fi
-  # number_book=$(echo "$book" | grep -oE "[0-9](.)[A-Za-z].*")
-  # if [ -n "$number_book" ]
-  # then
-  #   book=$(echo "$number_book" | sed "s| ||g")
-  # fi
-
-  # Check for non-ASCII characters
-  # non_ascii=$(echo "$book" | grep -Po "[^\x00-\x7F]")
-
-  # if [ -n "$chapter_verse" ]
-  # then
-  #   # before :
-  #   chapter=${chapter_verse%:*}
-  #   # after :
-  #   # Credit: https://stackoverflow.com/a/11416230
-  #   verse=${chapter_verse#*:}
-  #   # chapter=$(echo "$chapter_verse" | cut -d':' -f1)
-  #   # verse=$(echo "$chapter_verse" | cut -d':' -f2)
-  #
-  # fi
 }
 
 get_bible_verse() {
@@ -673,12 +644,16 @@ output() {
 bible() {
   args "$@"
   book_case
-  # if [[ ! $verse == "" ]]
-  # then
-  #   version="$verse"
-  # else
-  #   version="$chapter"
-  # fi
+
+  # Human output splits the reference by spaces, so the number of
+  # cut fields depends on how many words the book name has.
+  if [[ "$bible_book_name" == *\ * ]]; then
+    book_cut_args="-f1,2"
+    chapter_verse_cut_args="-f3"
+  else
+    book_cut_args="-f1"
+    chapter_verse_cut_args="-f2"
+  fi
 
   version_case
 
@@ -697,13 +672,10 @@ bible() {
   then
     verse="$verse_range"
   else
-    if [[ ! $3 =~ "listen" ]]
+    if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
     then
-      if [[ "$chapter" =~ ^[[:digit:]]+$ ]] && [[ ! "$verse" =~ ^[[:digit:]]+$ ]]
-      then
-        echo "Please enter verse number"
-        exit 0
-      fi
+      echo "Please enter verse number"
+      exit 0
     fi
   fi
 
@@ -1092,10 +1064,14 @@ search() {
 
 compare() {
   args "$@"
+  local ref="$chapter"
+  if [[ -n "$verse" ]]; then
+    ref+=":$verse"
+  fi
   for i in "${compare_versions[@]}"
   do
     printf '\n'
-    bible "$book" "$chapter" "$verse" "$i"
+    bible "$book" "$ref" "$i"
     printf '\n'
     divider_line
     sleep 0.3
@@ -1110,9 +1086,9 @@ translate() {
   else
     version=$3
   fi
-  if [[ ! $(command -v 'translate-shell') ]]
+  if [[ $(command -v 'translate-shell') ]]
   then
-    bible "$1" "$2" "$version" "$4" trans | trans :"$4"
+    bible "$1" "$2" "$version" trans | trans :"$4"
   else
     echo "translate-shell is not installed..."
     echo "install with apt install translate-shell"

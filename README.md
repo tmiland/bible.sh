@@ -55,6 +55,26 @@ Isaiah 54:17 - (KJV)
 https://www.bible.com/bible/1/ISA.54.17.KJV
 ```
 
+### Flexible reference parsing
+
+The `-b`, `-c`, `-l` and `-t` arguments are parsed flexibly. Chapter and verse
+can be given with or without a colon, with or without a space, and a numbered
+book name can be written with or without a space:
+
+```shell
+bible -b 2 Timoteus 1 2        # with space, no colon
+bible -b 2Timoteus 1 2         # no space, no colon
+bible -b 2 Timoteus 1:2        # with space, colon
+bible -b 2Timoteus 1:2         # no space, colon
+bible -b "2 Timoteus 1 2"      # whole reference as one quoted token
+bible -b Psalm 23 3            # chapter only
+bible -b 1 Corinthians 13 4-6  # verse range, no colon
+```
+
+A default version (KJV) is used when no version is given.
+
+Reference parsing and its callers were refactored by [opencode](https://opencode.ai).
+
 ### Alias to copy to clipboard
 
 ```shell
