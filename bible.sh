@@ -1061,16 +1061,23 @@ compare() {
 }
 
 translate() {
-  if [[ $3 == "hebrew" ]]; then
-    version="תנ\"ך"
-  elif [[ $3 == "greek" ]]; then
-    version="TR1624"
-  else
-    version=$3
+  local lang_arg='' target_arg=''
+  if [[ $# -ge 2 ]]; then
+    target_arg="${*: -1}"
   fi
-  if [[ $(command -v 'translate-shell') ]]
+  if [[ $# -ge 3 ]]; then
+    lang_arg="${*: -2:1}"
+  fi
+  if [[ "$lang_arg" == "hebrew" ]]; then
+    version="תנ\"ך"
+  elif [[ "$lang_arg" == "greek" ]]; then
+    version="TR1624"
+  elif [[ -n "$lang_arg" ]]; then
+    version="$lang_arg"
+  fi
+  if [[ $(command -v 'trans') ]]
   then
-    bible "$1" "$2" "$version" trans | trans :"$4"
+    bible "${@:1:$#-2}" "$version" trans | trans :"$target_arg"
   else
     echo "translate-shell is not installed..."
     echo "install with apt install translate-shell"
