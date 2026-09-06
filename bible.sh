@@ -703,9 +703,15 @@ bible() {
       | sed 's/"*$//g'
   }
 
-  book=$(
+  # book and version are also shown as parsed from the page, but the page is
+  # empty for an omitted verse. Keep the requested values in that case so the
+  # message and subsequent compare iterations aren't clobbered.
+  page_book=$(
     bible_response "$verse" human | cut -d ' ' $book_cut_args
   )
+  if [[ -n "$page_book" ]]; then
+    book="$page_book"
+  fi
 
   if [ -n "$verse_range" ]
   then
@@ -722,9 +728,12 @@ bible() {
     bible_response "$verse" human | cut -d ' ' $chapter_verse_cut_args
   )
 
-  version=$(
+  page_version=$(
     bible_response "$verse" local_abbreviation
   )
+  if [[ -n "$page_version" ]]; then
+    version="$page_version"
+  fi
 
   link=$(
     # cat $tmp | sed "s|\\\||g"| grep -Po "justify-center\" href=\"\K(.*?)\">" | sed "s|\">||g" | head -n 1
