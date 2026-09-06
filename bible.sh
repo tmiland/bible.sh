@@ -41,14 +41,42 @@
 
 audio_folder="$HOME/Audio/Listen Bible"
 
-## Uncomment for debugging purpose
-if [[ $* =~ "debug" ]]
+# Inline flags are stripped here so they don't leak into argument parsing
+DEBUG=''
+NOCOLOR=false
+_args=()
+for _arg in "$@"; do
+  case "$_arg" in
+    --debug|debug)
+      DEBUG=true
+      ;;
+    --nocolor|--no-color|nocolor)
+      NOCOLOR=true
+      ;;
+    *)
+      _args+=("$_arg")
+      ;;
+  esac
+done
+set -- "${_args[@]}"
+unset _args
+
+if [[ "$DEBUG" == true ]]
 then
   set -o errexit
   set -o pipefail
   set -o nounset
   set -o xtrace
 fi
+
+# Temporary files are cleaned up on exit
+tmp_files=()
+cleanup() {
+  if [[ ${#tmp_files[@]} -gt 0 ]]; then
+    rm -f "${tmp_files[@]}"
+  fi
+}
+trap cleanup EXIT
 # Symlink: ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 CROSS='✝'
 BQUOTE='“'
@@ -59,7 +87,7 @@ if which tput >/dev/null 2>&1; then
   ncolors=$(tput colors)
 fi
 
-if [[ $* =~ "nocolor" ]]
+if [[ "$NOCOLOR" == true ]]
 then
   #RED='\033[0;31m'
   GREEN=''
@@ -95,9 +123,7 @@ book=
 chapter=
 verse=
 version=
-listen=
 lang=
-fb_share=
 compare_versions_no=(B2024BM NORSK NB N78BM N11BM BGO_HVER BGO)
 compare_versions_en=(KJV NKJV NIV NLT ESV)
 
@@ -539,7 +565,11 @@ args() {
     else
       vers_idx=$((ref_idx + 1))
     fi
-    words=("${words[@]:vers_idx}")
+    if (( vers_idx < ${#words[@]} )); then
+      words=("${words[@]:vers_idx}")
+    else
+      words=()
+    fi
   else
     if [[ ${#words[@]} -gt 0 ]]; then
       book=$(printf '%s ' "${words[@]}")
@@ -579,7 +609,8 @@ args() {
 
 get_bible_verse() {
   # tmpfile
-  tmp=/tmp/bible.tmp
+  tmp=$(mktemp)
+  tmp_files+=("$tmp")
   # Grab verse and store in tmp file
   curl -s \
     --compressed \
@@ -793,7 +824,8 @@ bible() {
 
 listen() {
   local num=
-  listen_mp3_tmp=/tmp/listen_bible.html
+  listen_mp3_tmp=$(mktemp)
+  tmp_files+=("$listen_mp3_tmp")
   args "$@"
   version_case
   book_case
@@ -883,7 +915,8 @@ votd() {
   # fi
   version=$1
   lang=en
-  votd_tmp=/tmp/votd.json
+  votd_tmp=$(mktemp)
+  tmp_files+=("$votd_tmp")
   version_case
   # Set default version to KJV (1)
   if [ -z "$version" ]; then
@@ -923,6 +956,7 @@ votd() {
   )
   # Set image tmp file
   votd_img_tmp=$(mktemp)
+  tmp_files+=("$votd_img_tmp")
 
   if [[ $(command -v 'curl') ]]; then
     curl -fsSLk "$votd_img" > "$votd_img_tmp"
@@ -1009,8 +1043,10 @@ search() {
     sed "s|/*.js\"||g"
   )
   # Source: https://linuxopsys.com/read-json-file-in-shell-script
-  bible_search_tmp=/tmp/bible_search.html
-  bible_search_tmp2=/tmp/youversion_bible_content.tmp
+  bible_search_tmp=$(mktemp)
+  tmp_files+=("$bible_search_tmp")
+  bible_search_tmp2=$(mktemp)
+  tmp_files+=("$bible_search_tmp2")
   # Replace space with + sign if one or more spaces in search query
   # Source: https://stackoverflow.com/a/4449408/2898362
   if ( echo "$query" | grep -q ' ' )
@@ -1119,7 +1155,6 @@ usage() {
 EOF
 }
 
-ARGS=()
 while [[ $# -gt 0 ]]
 do
   case $1 in
@@ -1137,13 +1172,12 @@ do
       search "$@"
       exit 0
       ;;
-    --votd | -v)
+    --votd | -v | votd)
       shift
       votd "$@"
       exit 0
       ;;
     --listen | -l)
-      listen=true
       shift
       listen "$@"
       exit 0
@@ -1164,10 +1198,9 @@ do
       exit 1
       ;;
     *)
-      ARGS+=("$1")
-      shift
+      printf "%s\\n\\n" "Unrecognized argument: $1"
+      usage
+      exit 1
       ;;
   esac
 done
-
-set -- "${ARGS[@]}"
