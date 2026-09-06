@@ -106,13 +106,13 @@ else
     DIM="$(tput dim)"
     NC="$(tput sgr0)"
   else
-    #RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[0;33m'
-    BLUE='\033[0;34m'
-    BOLD="\033[1m"
-    DIM="\033[2m"
-    NC='\033[0m'
+    # Not a terminal: no colors, so piped output (e.g. translate) stays clean.
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    BOLD=""
+    DIM=""
+    NC=''
   fi
 fi
 # Maximum column width
@@ -1096,6 +1096,7 @@ usage() {
                        or bible -c Isaiah 54:17 [en|no]
   --translate | -t     bible -t Matthew 17:21 greek en
                        or bible -t Isaiah 54:17 hebrew en
+                       (greek: TR1624, NT only. hebrew: OT only)
 EOF
 }
 
