@@ -11,6 +11,8 @@ Symlink:
 ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 ```
 
+
+**Full write-up on the blog:** https://tmiland.com/bible-sh/
 ## Verse of the day
 
 Usage
