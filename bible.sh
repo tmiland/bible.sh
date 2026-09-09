@@ -799,6 +799,11 @@ listen() {
     head -n 1
   )
 
+  if [ -z "$listen_mp3_url" ]; then
+    echo "No audio found for $bible_book_name $chapter $version"
+    exit 0
+  fi
+
   listen_mp3_headline=$(
     grep -Po "headline\":\".*?(?=\")" "$listen_mp3_tmp" |
     sed "s|headline\":\"||g" |
@@ -808,8 +813,7 @@ listen() {
   listen_mp3_transcript=$(
     grep -Po "transcript\":\".*?(?=\")" "$listen_mp3_tmp" |
     sed "s|transcript\":\"||g" |
-    xargs |
-    sed "s|\.n|. \n\n|g"
+    sed "s|\\\\n|\n|g"
   )
 
   listen_mp3_link=$(
@@ -820,31 +824,50 @@ listen() {
   listen_mp3_filename=$(
     echo "$listen_mp3_url" |
     awk -F '/' '{print $7}' |
-    sed "s|?version_id=1||g"
+    sed "s|?version_id=[0-9]*||g"
   )
 
-  if [[ ! $(command -v 'vlc') ]]
+  if [[ -n $(command -v 'vlc') ]]
   then
-    echo "vlc player not installed..."
-    exit 0
+    player=(vlc --play-and-exit)
+  elif [[ -n $(command -v 'ffplay') ]]
+  then
+    player=(ffplay -autoexit -nodisp -loglevel quiet)
   else
-    if ! [ -d "$audio_folder"/"$version"/"$bible_book_name" ]; then
-      mkdir -p "$audio_folder"/"$version"/"$bible_book_name"
+    echo "vlc or ffplay not installed..."
+    exit 0
+  fi
+
+  chapter_pad=$(printf '%02d' "$chapter")
+  if ! [ -d "$audio_folder"/"$version"/"$bible_book_name" ]; then
+    mkdir -p "$audio_folder"/"$version"/"$bible_book_name"
+  fi
+  cd "$audio_folder/$version/$bible_book_name"
+  mp3=""
+  for cached in "$audio_folder/$version/$bible_book_name/"*"$bible_book_name""$chapter_pad"_"$version".mp3; do
+    if [ -f "$cached" ]; then
+      mp3="$cached"
+      break
     fi
-    cd "$audio_folder/$version/$bible_book_name"
-    curl -sO "$listen_mp3_url"
+  done
+  if [ -z "$mp3" ]; then
     tmp_mp3="$audio_folder/$version/$bible_book_name/$listen_mp3_filename"
+    curl -s -o "$tmp_mp3" "$listen_mp3_url"
     mp3_title=$(ffmpeg -i "$tmp_mp3" 2>&1 | grep -Po "title\K.*" | tr -d ': ')
-    mp3="$audio_folder"/"$version"/"$bible_book_name"/"$mp3_title".mp3
+    if [ -n "$mp3_title" ]; then
+      mp3="$audio_folder"/"$version"/"$bible_book_name"/"$mp3_title".mp3
+    else
+      mp3="$audio_folder"/"$version"/"$bible_book_name"/"$bible_book_name""$chapter_pad"_"$version".mp3
+    fi
     if ! [ -f "$mp3" ]; then
       mv "$tmp_mp3" "$mp3"
     else
       rm "$tmp_mp3"
     fi
-    cd - >/dev/null 2>&1
-    vlc --play-and-exit "$listen_mp3_url" >/dev/null 2>&1 &
-    rm "$listen_mp3_tmp"
   fi
+  cd - >/dev/null 2>&1
+  "${player[@]}" "$mp3" >/dev/null 2>&1 &
+  rm "$listen_mp3_tmp"
 
   printf "\n"
   echo -n "$listen_mp3_headline"
