@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.2] - 2026-09-09
+
+### Fixed
+- `--listen` / `-l`: audio filenames for non-KJV versions. The download cleanup
+  stripped only `?version_id=1` from the CDN filename, so NIV
+  (`?version_id=116`) produced a mangled `*.mp311` path, the `mv` failed, and
+  the player fell back to the remote URL. Any version id is now stripped, the
+  download is written directly to the temp path, and the player receives the
+  local, properly named file.
+- `--listen` transcripts: `xargs` collapsed JSON `\n` escapes into literal
+  `n` (`woman,nyou`) and choked on apostrophes (`xargs: unmatched single
+  quote`). The `\n` sequences are now converted to real newlines, restoring
+  verse and paragraph line breaks.
+
+### Added
+- `--listen` cache: chapters already present in the audio library are no
+  longer re-downloaded. Cached files are matched by their ID3-title name
+  (`BookNN_VERSION.mp3`, 2-digit padded chapter); files without an ID3 title
+  are stored as `BookNN_VERSION.mp3`.
+- Missing-audio guard: an invalid book/chapter/version now prints
+  "No audio found for ..." instead of feeding an empty URL to ffmpeg.
+- Player fallback: `ffplay` (ships with ffmpeg) is used when `vlc` is not
+  installed.
+
 ## [1.0.1] - 2026-09-06
 
 ### Fixed
