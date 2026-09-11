@@ -5,11 +5,28 @@ Script to get bible verse from bible.com
 
 ```shell
 wget -q https://github.com/tmiland/bible.sh/raw/main/bible.sh -O ~/.scripts/bible.sh
+wget -q https://github.com/tmiland/bible.sh/raw/main/bible -O ~/.scripts/bible
+chmod +x ~/.scripts/bible
 ```
-Symlink: 
+Symlink (the app frontend):
 ```shell
-ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
+ln -sfn ~/.scripts/bible ~/.local/bin/bible
 ```
+(`bible.sh` alone keeps working standalone: `bash bible.sh -b John 3:16 KJV`.)
+
+## App frontend
+
+Run `bible` with no arguments for the interactive app: greeting,
+daily verse, continue-reading, then menus for Read (Old/New
+Testament browse with chapter navigation, plus KJV Apocrypha:
+Tobit, Judith, Wisdom, Baruch, 1–2 Maccabees, Bel and the
+Dragon), Search, Compare, Listen, Verse of the Day, Translate,
+Version picker and Help. With arguments it behaves like
+`bible.sh` (`bible -b John 3:16 KJV`).
+
+Reading position, streak days, favorites and the cached verse
+live under `~/.cache/bible/`. List picking uses fzf when
+installed, otherwise numbered menus (`NO_FZF=1` forces menus).
 
 
 **Full write-up on the blog:** https://tmiland.com/bible-sh/
@@ -169,25 +186,29 @@ bible -t Isaiah 54:17 hebrew en
 ```
 or
 ```shell
-bible -t Matthew 17:21 greek en
+bible -t Matthew 17:21 greek en [google|bing] [brief|full]
 ```
-
-
-Output:
+or (source auto-detected: hebrew for OT, greek for NT)
 ```shell
-No weapon that is formed against thee shall prosper; and every tongue that shall rise against thee in judgment thou shalt condemn. This is the heritage of the servants of the LORD, and their righteousness is of me, saith the LORD.
+bible -t John 3:16 auto no
+```
+Engines with working free endpoints are google (default) and
+bing; output is brief and color-free unless `full` is given.
+The original verse prints above its translation for comparison.
 
-Intet våpen som dannes mot deg skal lykkes; og hver tunge som reiser seg mot deg i dommen, skal du fordømme. Dette er arven til Herrens tjenere, og deres rettferdighet kommer fra meg, sier Herren.
 
-Translations of No weapon that is formed against thee shall prosper; and every tongue that shall rise against thee in judgment thou shalt condemn. This is the heritage of the servants of the LORD, and their righteousness is of me, saith the LORD.
-[ English -> Norsk ]
+Output (brief):
+```shell
+Translating Filemon 1:6 (TR1624) -> no [google]
 
-No weapon that is formed against thee shall prosper;
-    Intet våpen som dannes mot deg skal lykkes;, Intet våpen som blir formet mot deg, skal lykkes;
-and every tongue that shall rise against thee in judgment thou shalt condemn.
-    og hver tunge som reiser seg mot deg i dommen, skal du fordømme., og hver tunge som reiser seg mot deg for å dømme, skal du fordømme.
-This is the heritage of the servants of the LORD, and their righteousness is of me, saith the LORD.
-    Dette er arven til Herrens tjenere, og deres rettferdighet kommer fra meg, sier Herren., Dette er arven til Herrens tjenere, og deres rettferdighet tilhører meg, sier Herren.
+“οπως η κοινωνια της πιστεως σου ενεργης
+γενηται εν επιγνωσει παντος αγαθου του εν
+υμιν εις χριστον ιησουν”
+
+ΠΡΟΣ ΦΙΛΗΜΟΝΑ 1:6 - (TR1624)
+https://www.bible.com/bible/182/PHM.1.6.TR1624
+
+likesom troens fellesskap er virksomt i kunnskapen om alt det gode ved Kristus Jesus
 ```
 
 ### Search

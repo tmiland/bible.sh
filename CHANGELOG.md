@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.0] - 2026-09-11
+
+### Added
+- New `bible` frontend (no extension): app-like menus over bible.sh —
+  Read (OT/NT browse with next/prev navigation), Search, Compare,
+  Listen, Verse of the Day, Translate, Version picker, Help, plus
+  full CLI passthrough (`bible -b John 3:16 KJV`). fzf list-picking
+  when installed (numbered fallback, `NO_FZF=1` opt-out).
+- Apocrypha via bible.com KJVAAE (Tobit, Judith, Wisdom, Baruch
+  incl. ch 6 Epistle, 1–2 Maccabees, Bel and the Dragon, Esther
+  additions); 7 new `book_case` entries with Norwegian aliases.
+- Home screen: time-of-day greeting, cached daily verse
+  (`~/.cache/bible`, stale fallback offline), continue-reading,
+  reading streak, favorites shelf (`[f]av` in chapter nav).
+- `votd()` text-only mode (`VOTD_TEXT=1`) for the home screen.
+- Translate: engine picker (google|bing, `TRANS_ENGINE`), target
+  quick-pick, auto source testament (hebrew OT / greek NT),
+  brief-clean color-free output by default (`full` opt-in),
+  engine-failure auto-retry, post-translation loop.
+- `testament()` OSIS helper; shared `chapter_text()` renderer.
+
+### Fixed
+- Verse parser rewritten for the new bible.com markup: chapter
+  pages lost their `twitterCard` JSON (every lookup returned
+  "omitted"); verses now come from `data-usfm` spans, books from
+  the localized page heading. Bonus: footnote callers, cross-ref
+  notes, headings and poetry wrappers no longer leak into verses.
+- `--listen` prints numbered verses instead of the raw transcript.
+- `votd`/`search` no longer die on unbound `$1`/`$2` under
+  `set -u` callers (the frontend runs nounset).
+
 ## [1.0.2] - 2026-09-09
 
 ### Fixed
