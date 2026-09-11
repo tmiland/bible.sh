@@ -228,19 +228,17 @@ menu_listen() {
   pause
 }
 
-menu_translate() {
-  local ref src tgt engine choice
-  read -rp "Reference (e.g. Matthew 17:21): " ref </dev/tty
-  [[ -z "$ref" ]] && return
-  read -rp "Source (greek/hebrew/version) [greek]: " src </dev/tty
+pick_target() {
+  # Sets tgt or returns 1 on abort.
+  local choice e
   choice=$(pick_from_list "Target language:" \
     "Norsk" "English" "Español" "Français" "Deutsch" \
     "Svenska" "Dansk" "Italiano" "Português" "Nederlands" "Custom…")
   case "$choice" in
-    "" ) return ;;
+    "") return 1 ;;
     "Custom…")
       read -rp "Target code (e.g. no, fi, is): " tgt </dev/tty
-      [[ -z "$tgt" ]] && return
+      [[ -z "$tgt" ]] && return 1
       ;;
     *)
       for e in "${_LANGS[@]}"; do
@@ -251,22 +249,53 @@ menu_translate() {
       done
       ;;
   esac
-  engine=$(pick_from_list "Engine (now: $TRANS_ENGINE):" "google" "bing")
-  if [[ -n "$engine" ]]; then
-    TRANS_ENGINE="$engine"
+}
+
+pick_engine() {
+  local choice
+  choice=$(pick_from_list "Engine (now: $TRANS_ENGINE):" "google" "bing")
+  if [[ -n "$choice" ]]; then
+    TRANS_ENGINE="$choice"
   fi
-  out=$(pick_from_list "Output (now: ${TRANS_VERBOSE:-brief}):" "brief" "full")
-  case "$out" in
-    full) TRANS_VERBOSE=1 ;;
-    brief) TRANS_VERBOSE="" ;;
+}
+
+pick_output() {
+  local choice
+  choice=$(pick_from_list "Output (now: ${TRANS_VERBOSE:-brief}):" "brief" "full")
+  case "$choice" in
+    full) TRANS_VERBOSE=1; out="full" ;;
+    brief) TRANS_VERBOSE=""; out="brief" ;;
   esac
-  # shellcheck disable=SC2086
-  if [[ -n "$out" ]]; then
-    translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE" "$out"
-  else
-    translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE"
-  fi
-  pause
+}
+
+menu_translate() {
+  local ref src tgt out nav
+  read -rp "Reference (e.g. Matthew 17:21): " ref </dev/tty
+  [[ -z "$ref" ]] && return
+  read -rp "Source (greek/hebrew/version) [greek]: " src </dev/tty
+  pick_target || return
+  pick_engine
+  pick_output
+  while true; do
+    # shellcheck disable=SC2086
+    if [[ -n "$out" ]]; then
+      translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE" "$out"
+    else
+      translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE"
+    fi
+    read -rp "[t]arget [e]ngine [o]utput [r]eference [q]uit: " nav </dev/tty
+    case "$nav" in
+      t|T) pick_target || true ;;
+      e|E) pick_engine ;;
+      o|O) pick_output ;;
+      r|R)
+        read -rp "Reference (e.g. Matthew 17:21): " ref </dev/tty
+        [[ -z "$ref" ]] && return
+        read -rp "Source (greek/hebrew/version) [greek]: " src </dev/tty
+        ;;
+      *) return ;;
+    esac
+  done
 }
 
 main_menu() {
