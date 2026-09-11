@@ -23,8 +23,9 @@ set -u
 
 # --- Library ---------------------------------------------------------
 # bible.sh lives next to this file and doubles as a function library
-# (its CLI dispatcher is skipped when sourced).
-_SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# (its CLI dispatcher is skipped when sourced). readlink resolves
+# the ~/.local/bin/bible symlink to the real location.
+_SRC_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 # shellcheck source=bible.sh
 if [[ -f "$_SRC_DIR/bible.sh" ]]; then
   source "$_SRC_DIR/bible.sh"
