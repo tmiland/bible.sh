@@ -68,6 +68,102 @@ _VERSIONS_ORIG=("TR1624" "תנ\"ך")
 DEF_VERSION="KJV"
 TRANS_ENGINE="google"
 
+# --- Home: greeting, daily verse, continue reading --------------------
+BIBLE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/bible"
+BIBLE_LAST="$BIBLE_CACHE/last"
+
+greeting() {
+  local h
+  h=$(date +%H)
+  if (( 10#$h >= 5 && 10#$h < 11 )); then
+    echo "Good morning"
+  elif (( 10#$h >= 11 && 10#$h < 18 )); then
+    echo "Good day"
+  elif (( 10#$h >= 18 && 10#$h < 23 )); then
+    echo "Good evening"
+  else
+    echo "Peaceful night"
+  fi
+}
+
+home_verse() {
+  # Daily verse, text only, refreshed once per day.
+  local today cache stale
+  today=$(date +%F)
+  cache="$BIBLE_CACHE/votd-$today"
+  mkdir -p "$BIBLE_CACHE"
+  if [[ ! -f "$cache" ]]; then
+    if VOTD_TEXT=1 votd "$DEF_VERSION" > "$cache.tmp" 2>/dev/null \
+       && grep -q 'https://' "$cache.tmp"; then
+      mv "$cache.tmp" "$cache"
+    else
+      rm -f "$cache.tmp"
+    fi
+  fi
+  if [[ -f "$cache" ]]; then
+    cat "$cache"
+    return
+  fi
+  stale=$(ls -t "$BIBLE_CACHE"/votd-* 2>/dev/null | head -n 1 || true)
+  if [[ -n "$stale" ]]; then
+    echo "${DIM}(from an earlier day)${NC}"
+    cat "$stale"
+  fi
+}
+
+home_header() {
+  divider_line
+  printf "${BOLD}✝ %s${NC}\n" "$(greeting)"
+  printf "${DIM}%s${NC}\n" "$(date +"%A %-d %B")"
+  divider_line
+  home_verse
+  divider_line
+}
+
+save_place() {
+  # $1 = "osis|name|chapter|version"
+  mkdir -p "$BIBLE_CACHE"
+  echo "$1" > "$BIBLE_LAST"
+}
+
+book_chapters() {
+  # $1 = OSIS → chapter count, empty if unknown.
+  local e
+  for e in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    if [[ "$(cut -d'|' -f1 <<<"$e")" == "$1" ]]; then
+      cut -d'|' -f3 <<<"$e"
+      return
+    fi
+  done
+}
+
+continue_label() {
+  local osis name ch ver
+  [[ -f "$BIBLE_LAST" ]] || return
+  IFS='|' read -r osis name ch ver < "$BIBLE_LAST"
+  if [[ -n "$name" && -n "$ch" ]]; then
+    echo "Continue: $name $ch"
+  fi
+}
+
+continue_place() {
+  local osis name ch ver maxch nav
+  IFS='|' read -r osis name ch ver < "$BIBLE_LAST"
+  [[ -z "$osis" || -z "$ch" ]] && return
+  ver="${ver:-$DEF_VERSION}"
+  maxch=$(book_chapters "$osis")
+  while true; do
+    show_chapter "$osis" "$ch" "$ver" "$name"
+    save_place "$osis|$name|$ch|$ver"
+    read -rp "[n]ext [p]rev [q]uit: " nav </dev/tty
+    case "$nav" in
+      n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      *) return ;;
+    esac
+  done
+}
+
 # Common translate-shell target codes; Custom… prompts for any code.
 _LANGS=(
   "Norsk|no" "English|en" "Español|es" "Français|fr" "Deutsch|de"
@@ -156,6 +252,7 @@ browse_books() {
     else
       bible "$name" "$ch:$ref" "$ver"
     fi
+    save_place "$osis|$name|$ch|$ver"
     read -rp "[n]ext [p]rev [v]erse [c]hapter [q]uit: " nav </dev/tty
     case "$nav" in
       n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
@@ -299,10 +396,22 @@ menu_translate() {
 }
 
 main_menu() {
-  local choice
+  local choice cont
+  local -a items
+  mkdir -p "$BIBLE_CACHE"
+  home_header
   while true; do
-    choice=$(pick_from_list "✝ bible — $DEF_VERSION" \
-      "Read" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
+    items=("Read" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
+    cont=$(continue_label)
+    if [[ -n "$cont" ]]; then
+      choice=$(pick_from_list "✝ bible — $DEF_VERSION" "$cont" "${items[@]}")
+      if [[ "$choice" == "$cont" ]]; then
+        continue_place
+        continue
+      fi
+    else
+      choice=$(pick_from_list "✝ bible — $DEF_VERSION" "${items[@]}")
+    fi
     case "$choice" in
       Read) menu_read ;;
       Search) menu_search ;;

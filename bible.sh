@@ -1035,7 +1035,9 @@ votd() {
   votd_img_tmp=$(mktemp)
   tmp_files+=("$votd_img_tmp")
 
-  if [[ -n "$votd_img" ]]; then
+  # VOTD_TEXT=1 (used by the bible frontend home screen): text only,
+  # skip the image download entirely.
+  if [[ -z "${VOTD_TEXT:-}" && -n "$votd_img" ]]; then
     if [[ $(command -v 'curl') ]]; then
       curl -fsSLk "$votd_img" > "$votd_img_tmp"
     elif [[ $(command -v 'wget') ]]; then
@@ -1054,7 +1056,7 @@ votd() {
     echo -e "${DIM}Et daglig ord med storlig glede.${NC}"
   fi
   echo
-  if [[ -n "$votd_img" ]]
+  if [[ -z "${VOTD_TEXT:-}" && -n "$votd_img" ]]
   then
     if [[ $(command -v 'convert') ]]
     then
@@ -1078,8 +1080,8 @@ votd() {
   # Display output
   output_correction
   output "$description" "$book" "$chapter_verse" "$version" "$link"
-  # Send desktop notification
-  if [[ $(command -v 'notify-send') ]]
+  # Send desktop notification (skipped for text-only home use)
+  if [[ -z "${VOTD_TEXT:-}" ]] && [[ $(command -v 'notify-send') ]]
   then
     message=$(
       # Disable colors
