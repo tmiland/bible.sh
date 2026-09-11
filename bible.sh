@@ -607,23 +607,53 @@ args() {
   fi
 }
 
-get_bible_verse() {
-  # tmpfile
+get_bible_chapter() {
+  # tmpfile — chapter pages server-render every verse as
+  # <span data-usfm="BOOK.CH.VERSE">, so one fetch serves single
+  # verses, ranges and (for the coming frontend) whole chapters.
   tmp=$(mktemp)
   tmp_files+=("$tmp")
-  # Grab verse and store in tmp file
+  # Grab chapter and store in tmp file
   curl -s \
     --compressed \
     -H 'Accept: */*' \
     -H "Cookie: version=$num" \
     -H 'Pragma: no-cache' \
     -H 'Cache-Control: no-cache' \
-    "https://www.bible.com/bible/$num/$1.$2.$3.$4" > "$tmp"
+    "https://www.bible.com/bible/$num/$1.$2.$3" > "$tmp"
   if [[ ! -s "$tmp" ]]; then
     echo "No result."
     echo
     exit 0
   fi
+}
+
+verse_text() {
+  # $1 = chapter html file, $2 = USFM (e.g. ISA.54.17).
+  # First occurrence wins: later duplicates live in footer/share cards.
+  # The file is folded to one line first because verse tags wrap
+  # their attributes across newlines.
+  # The verse chunk ends at the next verse marker or at the closing
+  # chapter divs (never at EOF: flight-data JSON would be swallowed).
+  tr '\n' ' ' < "$1" \
+    | grep -Po "data-usfm=\"$2\">.*?(?=data-usfm=\"|</div>|<script)" | head -n 1 \
+    | sed 's|^[^>]*>||' \
+    | sed 's|<span class="[^"]*__label">[^<]*</span>||' \
+    | sed 's|<[^>]*>||g' \
+    | sed 's|<[^>]*$||' \
+    | sed -e "s/&#x27;/'/g" -e 's/&#39;/'\''/g' -e 's/&quot;/"/g' \
+      -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&nbsp;/ /g' -e 's/&amp;/\&/g' \
+    | tr -s ' ' \
+    | sed 's/^ //; s/ $//' || true
+}
+
+chapter_usfms() {
+  # $1 = chapter html file, $2 = "BOOK.CH" — ordered unique verse
+  # USFMs of the chapter (for whole-chapter views in the frontend).
+  sed 's|data-usfm="|\ndata-usfm="|g' "$1" \
+    | grep -o "data-usfm=\"$2\.[0-9]*\"" \
+    | sed 's/data-usfm="//; s/"//' \
+    | awk '!seen[$0]++' || true
 }
 
 output_correction() {
@@ -663,16 +693,6 @@ bible() {
   args "$@"
   book_case
 
-  # Human output splits the reference by spaces, so the number of
-  # cut fields depends on how many words the book name has.
-  if [[ "$bible_book_name" == *\ * ]]; then
-    book_cut_args="-f1,2"
-    chapter_verse_cut_args="-f3"
-  else
-    book_cut_args="-f1"
-    chapter_verse_cut_args="-f2"
-  fi
-
   version_case
 
   if [ -n "$verse_range" ]
@@ -697,46 +717,35 @@ bible() {
     exit 0
   fi
 
-  get_bible_verse "$bible_book" "$chapter" "$verse" "$version"
+  get_bible_chapter "$bible_book" "$chapter" "$version"
 
-  bible_response() {
-    sed ':a;N;$!ba;s/\\n/ /g' "$tmp" \
-      | sed "s|\\\||g" \
-      | grep -Po '\"twitterCard\":\".*\",\"type\":\"verse\",\"usfm\":\"'"$bible_book"'.'"$chapter"'.'"$1"'\",\"verses\":\[{\K(.*?)\}\}' \
-      | grep -Po ''"$2"'":"\K(.*?)\"' \
-      | sed 's/"*$//g'
-  }
-
-  # book and version are also shown as parsed from the page, but the page is
-  # empty for an omitted verse. Keep the requested values in that case so the
-  # message and subsequent compare iterations aren't clobbered.
-  page_book=$(
-    bible_response "$verse" human | cut -d ' ' $book_cut_args
-  )
-  if [[ -n "$page_book" ]]; then
-    book="$page_book"
-  fi
-
+  # Chapter pages server-render every verse as <span data-usfm>.
+  # First span occurrence wins (later ones are footer/share cards).
   if [ -n "$verse_range" ]
   then
-    description=$(
-      bible_response "$verse_range" content
-    )
+    range_start="${verse_range%-*}"
+    range_end="${verse_range#*-}"
+    description=""
+    for (( v=range_start; v<=range_end; v++ )); do
+      verse_line=$(verse_text "$tmp" "$bible_book.$chapter.$v")
+      if [[ -n "$verse_line" ]]; then
+        description+="${description:+ }$verse_line"
+      fi
+    done
+    chapter_verse="$chapter:$verse_range"
   else
-    description=$(
-      bible_response "$verse" content
-    )
+    description=$(verse_text "$tmp" "$bible_book.$chapter.$verse")
+    chapter_verse="$chapter:$verse"
   fi
 
-  chapter_verse=$(
-    bible_response "$verse" human | cut -d ' ' $chapter_verse_cut_args
-  )
-
-  page_version=$(
-    bible_response "$verse" local_abbreviation
-  )
-  if [[ -n "$page_version" ]]; then
-    version="$page_version"
+  # Localized book name from the page heading ("Jesaja 54").
+  # Fall back to the canonical English name; the requested version
+  # is already canonical, so no page re-parse needed for it.
+  page_h1=$(grep -Po '<h1[^>]*>\K.*?(?=</h1>)' "$tmp" | head -n 1 || true)
+  if [[ -n "$page_h1" ]]; then
+    book="${page_h1% *}"
+  else
+    book="$bible_book_name"
   fi
 
   link="https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
