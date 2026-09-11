@@ -927,7 +927,7 @@ listen() {
 }
 
 votd() {
-  if [[ "$2" =~ ^[[:digit:]]+$ ]]
+  if [[ "${2:-}" =~ ^[[:digit:]]+$ ]]
   then
     doy=$2
   else
@@ -937,7 +937,7 @@ votd() {
     doy=$(date +%j)
     doy=$(($doy + 1))
   fi
-  version=$1
+  version=${1:-}
   lang=en
   # Set default version to KJV (1) before resolving the version id
   if [ -z "$version" ]; then
@@ -1038,8 +1038,8 @@ votd() {
 
 search() {
   num=
-  query=$1
-  version=$2
+  query=${1:-}
+  version=${2:-}
   version_case
 
   if [ -z "$version" ]; then
