@@ -112,18 +112,39 @@ home_verse() {
 }
 
 home_header() {
+  local streak
   divider_line
   printf "${BOLD}✝ %s${NC}\n" "$(greeting)"
   printf "${DIM}%s${NC}\n" "$(date +"%A %-d %B")"
+  streak=$(day_streak)
+  if [[ -n "$streak" ]]; then
+    printf "${DIM}%s-day reading streak — keep going${NC}\n" "$streak"
+  fi
   divider_line
   home_verse
   divider_line
 }
 
 save_place() {
-  # $1 = "osis|name|chapter|version"
+  # $1 = "osis|name|chapter|version". Also records the day for streaks.
   mkdir -p "$BIBLE_CACHE"
   echo "$1" > "$BIBLE_LAST"
+  grep -qxF "$(date +%F)" "$BIBLE_CACHE/days" 2>/dev/null \
+    || echo "$(date +%F)" >> "$BIBLE_CACHE/days"
+}
+
+day_streak() {
+  # Consecutive reading days ending today (or yesterday if today
+  # hasn't been read yet). Echoes the count or nothing.
+  local f="$BIBLE_CACHE/days" d n=0
+  [[ -f "$f" ]] || return
+  d=$(date +%F)
+  grep -qxF "$d" "$f" || d=$(date -d yesterday +%F)
+  while grep -qxF "$d" "$f"; do
+    ((n++)) || true
+    d=$(date -d "$d -1 day" +%F)
+  done
+  (( n >= 2 )) && echo "$n"
 }
 
 book_chapters() {
@@ -155,10 +176,11 @@ continue_place() {
   while true; do
     show_chapter "$osis" "$ch" "$ver" "$name"
     save_place "$osis|$name|$ch|$ver"
-    read -rp "[n]ext [p]rev [q]uit: " nav </dev/tty
+    read -rp "[n]ext [p]rev [f]av [q]uit: " nav </dev/tty
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      f|F) toggle_fav "$osis|$name|$ch|$ver" ;;
       *) return ;;
     esac
   done
@@ -191,7 +213,9 @@ pick_from_list() {
   if [[ "$_HAVE_FZF" == true ]]; then
     # fzf reads items from stdin and drives its UI on /dev/tty itself.
     picked=$(printf '%s\n' "← Back" "$@" \
-      | fzf --prompt="$prompt " --height=40% --reverse --cycle --border || true)
+      | fzf --prompt="$prompt › " --pointer="›" --border=rounded \
+        --color="prompt:bold,pointer:green" --height=40% --reverse \
+        --cycle || true)
     if [[ -z "$picked" || "$picked" == "← Back" ]]; then
       echo ""
     else
@@ -201,12 +225,12 @@ pick_from_list() {
   fi
   # Menu goes to stderr: stdout carries only the result, which the
   # caller captures via $().
-  echo "$prompt" >&2
+  printf "${BOLD}%s${NC}\n" "$prompt" >&2
   for i in "${!items[@]}"; do
-    printf "  %2d) %s\n" "$((i + 1))" "${items[$i]}" >&2
+    printf "  ${DIM}%2d)${NC} %s\n" "$((i + 1))" "${items[$i]}" >&2
   done
-  printf "   0) Back\n" >&2
-  read -rp "> " choice </dev/tty
+  printf "  ${DIM} 0)${NC} Back\n" >&2
+  read -rp "› " choice </dev/tty
   if [[ "$choice" =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= ${#items[@]})); then
     echo "${items[$((choice - 1))]}"
   else
@@ -253,12 +277,13 @@ browse_books() {
       bible "$name" "$ch:$ref" "$ver"
     fi
     save_place "$osis|$name|$ch|$ver"
-    read -rp "[n]ext [p]rev [v]erse [c]hapter [q]uit: " nav </dev/tty
+    read -rp "[n]ext [p]rev [v]erse [c]hapter [f]av [q]uit: " nav </dev/tty
     case "$nav" in
       n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
       v|V) read -rp "Verse (empty = whole chapter): " ref </dev/tty ;;
       c|C) ch="" ;;
+      f|F) toggle_fav "$osis|$name|$ch|$ver" ;;
       *) return ;;
     esac
   done
@@ -275,6 +300,47 @@ show_chapter() {
 }
 
 # --- Menus -----------------------------------------------------------
+toggle_fav() {
+  # $1 = "osis|name|chapter|version" — toggles the favorites shelf.
+  local fav="$BIBLE_CACHE/favorites"
+  mkdir -p "$BIBLE_CACHE"
+  touch "$fav"
+  if grep -qxF "$1" "$fav"; then
+    grep -vxF "$1" "$fav" > "$fav.tmp" && mv "$fav.tmp" "$fav"
+    echo "Removed from favorites."
+  else
+    echo "$1" >> "$fav"
+    echo "Saved to favorites."
+  fi
+}
+
+menu_favorites() {
+  local entry label line
+  local -a labels
+  [[ -f "$BIBLE_CACHE/favorites" ]] || { echo "No favorites yet."; pause; return; }
+  labels=()
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    label="$(cut -d'|' -f2 <<<"$line") $(cut -d'|' -f3 <<<"$line") ($(cut -d'|' -f4 <<<"$line"))"
+    labels+=("$label")
+  done < "$BIBLE_CACHE/favorites"
+  if (( ${#labels[@]} == 0 )); then
+    echo "No favorites yet."
+    pause
+    return
+  fi
+  entry=$(pick_from_list "Favorites:" "${labels[@]}")
+  [[ -z "$entry" ]] && return
+  while IFS= read -r line; do
+    label="$(cut -d'|' -f2 <<<"$line") $(cut -d'|' -f3 <<<"$line") ($(cut -d'|' -f4 <<<"$line"))"
+    if [[ "$label" == "$entry" ]]; then
+      echo "$line" > "$BIBLE_LAST"
+      continue_place
+      return
+    fi
+  done < "$BIBLE_CACHE/favorites"
+}
+
 menu_read() {
   local choice
   choice=$(pick_from_list "Read:" "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
@@ -401,7 +467,7 @@ main_menu() {
   mkdir -p "$BIBLE_CACHE"
   home_header
   while true; do
-    items=("Read" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
+    items=("Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
     cont=$(continue_label)
     if [[ -n "$cont" ]]; then
       choice=$(pick_from_list "✝ bible — $DEF_VERSION" "$cont" "${items[@]}")
@@ -414,6 +480,7 @@ main_menu() {
     fi
     case "$choice" in
       Read) menu_read ;;
+      Favorites) menu_favorites ;;
       Search) menu_search ;;
       Compare) menu_compare ;;
       Listen) menu_listen ;;
