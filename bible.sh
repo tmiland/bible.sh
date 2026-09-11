@@ -718,6 +718,12 @@ output_correction() {
   description=${description//– /}
   chapter_verse=${chapter_verse//&#x27;/\'}
   if [ -z "$description" ]; then
+    if [[ -n "${BIBLE_PLAIN:-}" ]]; then
+      # Translators must not receive the error message.
+      echo "No result." >&2
+      echo >&2
+      return 1
+    fi
     echo "No result."
     echo
     exit 0
@@ -725,6 +731,13 @@ output_correction() {
 }
 
 output() {
+  if [[ -n "${BIBLE_PLAIN:-}" ]]; then
+    # Pure verse text on stdout (for piping into translators);
+    # nothing else, so the MT engine sees clean source. Unfolded:
+    # trans translates line-by-line, wrapped fragments mistranslate.
+    echo "$1"
+    return
+  fi
   # Fold description to set width
   description=$(echo "$1" | fold -w ${width} -s)
   printf "\n"
@@ -831,6 +844,12 @@ bible() {
 
   if [[ $description =~ "omitted"|"utelatt" ]]
   then
+    if [[ -n "${BIBLE_PLAIN:-}" ]]; then
+      # Translators must not receive the error message: stderr only,
+      # empty stdout, nonzero return.
+      printf "\n%s\n\n" "$description_folded" >&2
+      return 1
+    fi
     printf "\n"
     echo -n "${BQUOTE}$description_folded${EQUOTE}"
     printf "\n"
@@ -838,6 +857,9 @@ bible() {
   else
     # Display output
     output_correction
+    if [[ -z "$description" ]]; then
+      return 1 # PLAIN no-result already reported on stderr
+    fi
     output "$description" "$book" "$chapter_verse" "$version" "$link"
   fi
 }
@@ -1162,6 +1184,8 @@ translate() {
   # Brief output is the default; full restores trans' verbose
   # dictionaries (also via TRANS_VERBOSE=1).
   local lang_arg='' target_arg='' engine="${TRANS_ENGINE:-google}" verbose=false
+  local ref_display='' trans_out=''
+  local -a trans_args=()
   # Blank palette: translation output is always color-free (dynamic
   # scope carries this into bible(); trans gets -no-ansi below).
   local GREEN='' YELLOW='' BLUE='' BOLD='' DIM='' NC=''
@@ -1201,11 +1225,29 @@ translate() {
   fi
   if [[ $(command -v 'trans') ]]
   then
-    if [[ "$verbose" == true ]]; then
-      bible "${@:1:target_idx-2}" "$version" trans | trans -no-ansi -e "$engine" :"$target_arg"
-    else
-      bible "${@:1:target_idx-2}" "$version" trans | trans -no-ansi -b -e "$engine" :"$target_arg"
+    ref_display="${*:1:target_idx-2}"
+    printf '\nTranslating %s (%s) -> %s [%s]\n\n' \
+      "$ref_display" "$version" "$target_arg" "$engine" >&2
+    trans_args=(-no-ansi -e "$engine" :"$target_arg")
+    if [[ "$verbose" != true ]]; then
+      trans_args=(-no-ansi -b -e "$engine" :"$target_arg")
     fi
+    trans_out=$(BIBLE_PLAIN=1 bible "${@:1:target_idx-2}" "$version" | trans "${trans_args[@]}")
+    if grep -qiE '\[ERROR\]|Something went wrong|Potential Security Risk|Translator not found' <<<"$trans_out"; then
+      # Transient engine failure (TLS/rate-limit): try the other one.
+      if [[ "$engine" == "google" ]]; then
+        engine="bing"
+      else
+        engine="google"
+      fi
+      printf 'Engine failed, retrying with %s...\n\n' "$engine" >&2
+      trans_args=(-no-ansi -b -e "$engine" :"$target_arg")
+      if [[ "$verbose" == true ]]; then
+        trans_args=(-no-ansi -e "$engine" :"$target_arg")
+      fi
+      trans_out=$(BIBLE_PLAIN=1 bible "${@:1:target_idx-2}" "$version" | trans "${trans_args[@]}")
+    fi
+    printf '%s\n' "$trans_out"
   else
     echo "translate-shell is not installed..."
     echo "install with apt install translate-shell"
