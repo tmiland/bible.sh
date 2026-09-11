@@ -1,0 +1,373 @@
+#!/usr/bin/env bash
+
+## Author: Tommy Miland (@tmiland) - Copyright (c) 2026
+##
+######################################################################
+####                            bible                             ####
+####   Interactive frontend to bible.sh — browse the Bible like   ####
+####   an app: menus for Read, Search, Compare, Listen, VOTD,     ####
+####   Translate. Run with args to use bible.sh commands          ####
+####   directly (bible -b John 3:16 KJV).                         ####
+######################################################################
+#
+# Install:
+#   wget -q https://github.com/tmiland/bible.sh/raw/main/bible -O ~/.scripts/bible
+#   wget -q https://github.com/tmiland/bible.sh/raw/main/bible.sh -O ~/.scripts/bible.sh
+#   chmod +x ~/.scripts/bible
+# Symlink:
+#   ln -sfn ~/.scripts/bible ~/.local/bin/bible
+#
+# MIT License — see LICENSE in this repo.
+
+set -u
+
+# --- Library ---------------------------------------------------------
+# bible.sh lives next to this file and doubles as a function library
+# (its CLI dispatcher is skipped when sourced).
+_SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bible.sh
+if [[ -f "$_SRC_DIR/bible.sh" ]]; then
+  source "$_SRC_DIR/bible.sh"
+else
+  echo "bible.sh library not found next to $0 — reinstall both files."
+  exit 1
+fi
+trap cleanup EXIT
+
+# --- Metadata: OSIS|Name|Chapters (+ bolls number for Apocrypha) ------
+_OT=(
+  "GEN|Genesis|50" "EXO|Exodus|40" "LEV|Leviticus|27" "NUM|Numbers|36"
+  "DEU|Deuteronomy|34" "JOS|Joshua|24" "JDG|Judges|21" "RUT|Ruth|4"
+  "1SA|1 Samuel|31" "2SA|2 Samuel|24" "1KI|1 Kings|22" "2KI|2 Kings|25"
+  "1CH|1 Chronicles|29" "2CH|2 Chronicles|36" "EZR|Ezra|10" "NEH|Nehemiah|13"
+  "EST|Esther|10" "JOB|Job|42" "PSA|Psalm|150" "PRO|Proverbs|31"
+  "ECC|Ecclesiastes|12" "SNG|Song of Solomon|8" "ISA|Isaiah|66" "JER|Jeremiah|52"
+  "LAM|Lamentations|5" "EZK|Ezekiel|48" "DAN|Daniel|12" "HOS|Hosea|14"
+  "JOL|Joel|3" "AMO|Amos|9" "OBA|Obadiah|1" "JON|Jonah|4" "MIC|Micah|7"
+  "NAM|Nahum|3" "HAB|Habakkuk|3" "ZEP|Zephaniah|3" "HAG|Haggai|2"
+  "ZEC|Zechariah|14" "MAL|Malachi|4"
+)
+_NT=(
+  "MAT|Matthew|28" "MRK|Mark|16" "LUK|Luke|24" "JHN|John|21" "ACT|Acts|28"
+  "ROM|Romans|16" "1CO|1 Corinthians|16" "2CO|2 Corinthians|13" "GAL|Galatians|6"
+  "EPH|Ephesians|6" "PHP|Philippians|4" "COL|Colossians|4" "1TH|1 Thessalonians|5"
+  "2TH|2 Thessalonians|3" "1TI|1 Timothy|6" "2TI|2 Timothy|4" "TIT|Titus|3"
+  "PHM|Philemon|1" "HEB|Hebrews|13" "JAS|James|5" "1PE|1 Peter|5" "2PE|2 Peter|3"
+  "1JN|1 John|5" "2JN|2 John|1" "3JN|3 John|1" "JUD|Jude|1" "REV|Revelation|22"
+)
+# KJV Apocrypha via bolls.life (bolls book number appended).
+_APO=(
+  "1ES|1 Esdras|9|67" "TOB|Tobit|14|68" "JDT|Judith|16|69" "WIS|Wisdom|19|70"
+  "SIR|Sirach|51|71" "EJR|Epistle of Jeremiah|1|72" "BAR|Baruch|5|73"
+  "1MA|1 Maccabees|16|74" "2MA|2 Maccabees|15|75" "PRM|Prayer of Manasseh|1|76"
+  "2ES|2 Esdras|16|77" "SUS|Susanna|1|78" "BEL|Bel and the Dragon|1|79"
+)
+_VERSIONS_NO=("B2024BM" "NORSK" "NB" "N78BM" "N11BM" "ELB" "BGO_HVER" "BGO")
+_VERSIONS_EN=("KJV" "NKJV" "NIV" "NLT" "ESV" "AMP" "GNV" "WBMS" "KJVAAE" "KJVAE")
+_VERSIONS_ORIG=("TR1624" "תנ\"ך")
+
+DEF_VERSION="KJV"
+
+# fzf for list picking when available (fallback: numbered menu).
+# Opt out with NO_FZF=1.
+_HAVE_FZF=false
+if [[ -z "${NO_FZF:-}" && -n $(command -v 'fzf') ]]; then
+  _HAVE_FZF=true
+fi
+
+# --- Helpers ---------------------------------------------------------
+pause() {
+  read -rp "Press Enter to continue..." _ </dev/tty
+}
+
+pick_from_list() {
+  # $1 = prompt; rest = items. Echoes the chosen item (empty on abort).
+  local prompt="$1"
+  shift
+  local items=("$@")
+  local i choice picked
+  if [[ "$_HAVE_FZF" == true ]]; then
+    # fzf reads items from stdin and drives its UI on /dev/tty itself.
+    picked=$(printf '%s\n' "← Back" "$@" \
+      | fzf --prompt="$prompt " --height=40% --reverse --cycle --border || true)
+    if [[ -z "$picked" || "$picked" == "← Back" ]]; then
+      echo ""
+    else
+      echo "$picked"
+    fi
+    return
+  fi
+  # Menu goes to stderr: stdout carries only the result, which the
+  # caller captures via $().
+  echo "$prompt" >&2
+  for i in "${!items[@]}"; do
+    printf "  %2d) %s\n" "$((i + 1))" "${items[$i]}" >&2
+  done
+  printf "   0) Back\n" >&2
+  read -rp "> " choice </dev/tty
+  if [[ "$choice" =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= ${#items[@]})); then
+    echo "${items[$((choice - 1))]}"
+  else
+    echo ""
+  fi
+}
+
+# --- Canon reading (bible.com, via the library) ----------------------
+show_chapter() {
+  # $1=OSIS $2=chapter $3=version $4=display name (optional)
+  local osis="$1" ch="$2" ver="$3" dname="${4:-$1}" usfm vnum vtext
+  version="$ver"
+  version_case
+  get_bible_chapter "$osis" "$ch" "$ver"
+  while IFS= read -r usfm; do
+    vnum="${usfm##*.}"
+    vtext=$(verse_text "$tmp" "$usfm")
+    if [[ -n "$vtext" ]]; then
+      printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w ${width} -s)"
+    fi
+  done < <(chapter_usfms "$tmp" "$osis.$ch")
+  printf "\n${GREEN}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$dname" "$ch" "$ver"
+  printf "${BLUE}https://www.bible.com/bible/%s/%s.%s.%s${NC}\n\n" "$num" "$osis" "$ch" "$ver"
+}
+
+browse_canon() {
+  local testament="$1" entry osis name maxch ch ref
+  local -a books names
+  if [[ "$testament" == "OT" ]]; then
+    books=("${_OT[@]}")
+  else
+    books=("${_NT[@]}")
+  fi
+  names=()
+  for entry in "${books[@]}"; do
+    names+=("$(cut -d'|' -f2 <<<"$entry")")
+  done
+  entry=$(pick_from_list "Books:" "${names[@]}")
+  [[ -z "$entry" ]] && return
+  for e in "${books[@]}"; do
+    if [[ "$(cut -d'|' -f2 <<<"$e")" == "$entry" ]]; then
+      entry="$e"
+      break
+    fi
+  done
+  osis="$(cut -d'|' -f1 <<<"$entry")"
+  name="$(cut -d'|' -f2 <<<"$entry")"
+  maxch="$(cut -d'|' -f3 <<<"$entry")"
+  ch=""
+  while true; do
+    if [[ -z "$ch" ]]; then
+      read -rp "$name has $maxch chapters. Chapter (1-$maxch, 0=back): " ch </dev/tty
+      [[ "$ch" == "0" ]] && return
+      if ! [[ "$ch" =~ ^[0-9]+$ ]] || ((ch < 1 || ch > maxch)); then
+        echo "Enter a chapter between 1 and $maxch."
+        ch=""
+        continue
+      fi
+      read -rp "Verse (empty = whole chapter): " ref </dev/tty
+    fi
+    if [[ -z "$ref" ]]; then
+      show_chapter "$osis" "$ch" "$DEF_VERSION" "$name"
+    else
+      bible "$name" "$ch:$ref" "$DEF_VERSION"
+    fi
+    read -rp "[n]ext [p]rev [v]erse [c]hapter [q]uit: " nav </dev/tty
+    case "$nav" in
+      n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
+      v|V) read -rp "Verse (empty = whole chapter): " ref </dev/tty ;;
+      c|C) ch="" ;;
+      *) return ;;
+    esac
+  done
+}
+
+# --- Apocrypha reading (bolls.life KJV) ------------------------------
+bolls_text() {
+  # $1=bolls book number $2=chapter $3=verse (empty = whole chapter)
+  local bnum="$1" ch="$2" v="$3" json
+  if [[ ! $(command -v 'jq') ]]; then
+    echo "jq not installed..."
+    return
+  fi
+  json=$(mktemp)
+  tmp_files+=("$json")
+  curl -s -m 30 "https://bolls.life/get-text/KJV/$bnum/$ch/" >"$json"
+  if [[ ! -s "$json" ]] || ! jq -e 'type == "array"' "$json" >/dev/null 2>&1; then
+    echo "No result."
+    return
+  fi
+  strip_strongs() {
+    sed 's|<S>[0-9]*</S>||g' | tr -s ' ' | sed 's/^ //; s/ $//'
+  }
+  if [[ -z "$v" ]]; then
+    jq -r '.[] | "\(.verse) \(.text)"' "$json" | strip_strongs | fold -w ${width} -s
+  else
+    jq -r --argjson vv "$v" '.[] | select(.verse == $vv) | .text' "$json" | strip_strongs | fold -w ${width} -s
+  fi
+}
+
+show_apo_verse() {
+  # $1=bolls book number $2=name $3=chapter $4=verse (empty = whole chapter)
+  local bnum="$1" name="$2" ch="$3" v="$4" out
+  if [[ -z "$v" ]]; then
+    bolls_text "$bnum" "$ch" ""
+    printf "\n${GREEN}%s %s${NC} - ${YELLOW}(KJV-APO)${NC}\n" "$name" "$ch"
+    printf "${BLUE}https://bolls.life/get-text/KJV/%s/%s/${NC}\n" "$bnum" "$ch"
+    return
+  fi
+  out=$(bolls_text "$bnum" "$ch" "$v")
+  if [[ -z "$out" ]]; then
+    echo "This verse has been omitted from this Bible version (KJV-APO),"
+    echo "or a number out of range has been entered."
+    return
+  fi
+  echo -n "${BQUOTE}$out${EQUOTE}"
+  echo ""
+  echo ""
+  echo -n "${GREEN}$name $ch:$v${NC} - ${YELLOW}(KJV-APO)${NC}"
+  echo ""
+  echo -n "${BLUE}https://bolls.life/get-text/KJV/$bnum/$ch/${NC}"
+  printf "\n"
+}
+
+browse_apocrypha() {
+  local entry name maxch bnum ch v
+  local -a names
+  names=()
+  for entry in "${_APO[@]}"; do
+    names+=("$(cut -d'|' -f2 <<<"$entry")")
+  done
+  entry=$(pick_from_list "Apocrypha (KJV):" "${names[@]}")
+  [[ -z "$entry" ]] && return
+  for e in "${_APO[@]}"; do
+    if [[ "$(cut -d'|' -f2 <<<"$e")" == "$entry" ]]; then
+      entry="$e"
+      break
+    fi
+  done
+  name="$(cut -d'|' -f2 <<<"$entry")"
+  maxch="$(cut -d'|' -f3 <<<"$entry")"
+  bnum="$(cut -d'|' -f4 <<<"$entry")"
+  ch=""
+  while true; do
+    if [[ -z "$ch" ]]; then
+      read -rp "$name has $maxch chapters. Chapter (1-$maxch, 0=back): " ch </dev/tty
+      [[ "$ch" == "0" ]] && return
+      if ! [[ "$ch" =~ ^[0-9]+$ ]] || ((ch < 1 || ch > maxch)); then
+        echo "Enter a chapter between 1 and $maxch."
+        ch=""
+        continue
+      fi
+      read -rp "Verse (empty = whole chapter): " v </dev/tty
+    fi
+    printf "\n"
+    show_apo_verse "$bnum" "$name" "$ch" "$v"
+    read -rp "[n]ext [p]rev [v]erse [c]hapter [q]uit: " nav </dev/tty
+    case "$nav" in
+      n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; v="" ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; v="" ;;
+      v|V) read -rp "Verse (empty = whole chapter): " v </dev/tty ;;
+      c|C) ch="" ;;
+      *) return ;;
+    esac
+  done
+}
+
+# --- Menus -----------------------------------------------------------
+menu_read() {
+  local choice
+  choice=$(pick_from_list "Read:" "Old Testament" "New Testament" "Apocrypha (KJV)")
+  case "$choice" in
+    "Old Testament") browse_canon "OT" ;;
+    "New Testament") browse_canon "NT" ;;
+    "Apocrypha (KJV)") browse_apocrypha ;;
+  esac
+}
+
+menu_version() {
+  local choice
+  choice=$(pick_from_list "Default version (now: $DEF_VERSION):" \
+    "${_VERSIONS_EN[@]}" "${_VERSIONS_NO[@]}" "${_VERSIONS_ORIG[@]}")
+  if [[ -n "$choice" ]]; then
+    DEF_VERSION="$choice"
+    echo "Default version: $DEF_VERSION"
+    sleep 0.5
+  fi
+}
+
+menu_search() {
+  local q v
+  read -rp "Keywords: " q </dev/tty
+  [[ -z "$q" ]] && return
+  read -rp "Version [$DEF_VERSION]: " v </dev/tty
+  search "$q" "${v:-$DEF_VERSION}"
+  pause
+}
+
+menu_compare() {
+  local ref vers
+  read -rp "Reference (e.g. John 3:16): " ref </dev/tty
+  [[ -z "$ref" ]] && return
+  read -rp "Versions (space-separated, en/no, [$DEF_VERSION]): " vers </dev/tty
+  # shellcheck disable=SC2086
+  compare $ref ${vers:-$DEF_VERSION}
+  pause
+}
+
+menu_listen() {
+  local ref v
+  read -rp "Chapter to listen (e.g. Isaiah 54): " ref </dev/tty
+  [[ -z "$ref" ]] && return
+  read -rp "Version [$DEF_VERSION]: " v </dev/tty
+  # shellcheck disable=SC2086
+  listen $ref ${v:-$DEF_VERSION}
+  pause
+}
+
+menu_translate() {
+  local ref src tgt
+  read -rp "Reference (e.g. Matthew 17:21): " ref </dev/tty
+  [[ -z "$ref" ]] && return
+  read -rp "Source (greek/hebrew/version) [greek]: " src </dev/tty
+  read -rp "Target language [en]: " tgt </dev/tty
+  # shellcheck disable=SC2086
+  translate $ref "${src:-greek}" "${tgt:-en}"
+  pause
+}
+
+main_menu() {
+  local choice
+  while true; do
+    choice=$(pick_from_list "✝ bible — $DEF_VERSION" \
+      "Read" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
+    case "$choice" in
+      Read) menu_read ;;
+      Search) menu_search ;;
+      Compare) menu_compare ;;
+      Listen) menu_listen ;;
+      "Verse of the Day") votd "$DEF_VERSION"; pause ;;
+      Translate) menu_translate ;;
+      Version) menu_version ;;
+      Help) usage; pause ;;
+      *) return ;;
+    esac
+  done
+}
+
+# --- Entry -----------------------------------------------------------
+if [[ $# -gt 0 ]]; then
+  # CLI passthrough to the library commands.
+  case "$1" in
+    --help | -h) usage ;;
+    --bible | -b) shift; bible "$@" ;;
+    --search | -s) shift; search "$@" ;;
+    --votd | -v | votd) shift; votd "$@" ;;
+    --listen | -l) shift; listen "$@" ;;
+    --compare | -c) shift; compare "$@" ;;
+    --translate | -t) shift; translate "$@" ;;
+    *) usage; exit 1 ;;
+  esac
+  exit 0
+fi
+
+main_menu

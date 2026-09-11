@@ -41,6 +41,13 @@
 
 audio_folder="$HOME/Audio/Listen Bible"
 
+# When sourced as a library (e.g. by the `bible` frontend), skip the
+# CLI-only bits: caller's "$@" must not be rewritten or dispatched on.
+_BIBLE_LIB=false
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  _BIBLE_LIB=true
+fi
+
 # Inline flags are stripped here so they don't leak into argument parsing
 DEBUG=''
 NOCOLOR=false
@@ -58,7 +65,9 @@ for _arg in "$@"; do
       ;;
   esac
 done
-set -- "${_args[@]}"
+if [[ "$_BIBLE_LIB" != true ]]; then
+  set -- "${_args[@]}"
+fi
 unset _args
 
 if [[ "$DEBUG" == true ]]
@@ -1132,6 +1141,8 @@ usage() {
 EOF
 }
 
+# CLI dispatcher — skipped when sourced as a library.
+if [[ "$_BIBLE_LIB" != true ]]; then
 while [[ $# -gt 0 ]]
 do
   case $1 in
@@ -1181,3 +1192,4 @@ do
       ;;
   esac
 done
+fi # _BIBLE_LIB
