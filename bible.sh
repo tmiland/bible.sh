@@ -1157,12 +1157,25 @@ compare() {
 }
 
 translate() {
-  local lang_arg='' target_arg=''
-  if [[ $# -ge 2 ]]; then
-    target_arg="${*: -1}"
+  # Usage: translate REF... SRC TGT [ENGINE]
+  # ENGINE is google (default) or bing; also via TRANS_ENGINE env.
+  local lang_arg='' target_arg='' engine="${TRANS_ENGINE:-google}"
+  local n=$#
+  local target_idx=$n lang_idx=$((n - 1))
+  local last=""
+  if (( n >= 1 )); then
+    last="${*:$n:1}"
   fi
-  if [[ $# -ge 3 ]]; then
-    lang_arg="${*: -2:1}"
+  if [[ "$last" == "google" || "$last" == "bing" ]] && (( n >= 4 )); then
+    engine="$last"
+    target_idx=$((n - 1))
+    lang_idx=$((n - 2))
+  fi
+  if (( target_idx >= 2 )); then
+    target_arg="${*:target_idx:1}"
+  fi
+  if (( lang_idx >= 3 )); then
+    lang_arg="${*:lang_idx:1}"
   fi
   if [[ "$lang_arg" == "hebrew" ]]; then
     version="תנ\"ך"
@@ -1173,7 +1186,7 @@ translate() {
   fi
   if [[ $(command -v 'trans') ]]
   then
-    bible "${@:1:$#-2}" "$version" trans | trans :"$target_arg"
+    bible "${@:1:target_idx-2}" "$version" trans | trans -e "$engine" :"$target_arg"
   else
     echo "translate-shell is not installed..."
     echo "install with apt install translate-shell"
@@ -1190,9 +1203,11 @@ usage() {
   --listen    | -l     bible -l Isaiah 54 KJV
   --compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
                        or bible -c Isaiah 54:17 [en|no]
-  --translate | -t     bible -t Matthew 17:21 greek en
+  --translate | -t     bible -t Matthew 17:21 greek en [google|bing]
                        or bible -t Isaiah 54:17 hebrew en
-                       (greek: TR1624, NT only. hebrew: OT only)
+                       (greek: TR1624, NT only. hebrew: OT only.
+                        engine: google default, bing alternative;
+                        TRANS_ENGINE env also works)
 EOF
 }
 

@@ -66,6 +66,13 @@ _VERSIONS_EN=("KJV" "NKJV" "NIV" "NLT" "ESV" "AMP" "GNV" "WBMS" "KJVAAE" "KJVAE"
 _VERSIONS_ORIG=("TR1624" "תנ\"ך")
 
 DEF_VERSION="KJV"
+TRANS_ENGINE="google"
+
+# Common translate-shell target codes; Custom… prompts for any code.
+_LANGS=(
+  "Norsk|no" "English|en" "Español|es" "Français|fr" "Deutsch|de"
+  "Svenska|sv" "Dansk|da" "Italiano|it" "Português|pt" "Nederlands|nl"
+)
 
 # fzf for list picking when available (fallback: numbered menu).
 # Opt out with NO_FZF=1.
@@ -222,13 +229,34 @@ menu_listen() {
 }
 
 menu_translate() {
-  local ref src tgt
+  local ref src tgt engine choice
   read -rp "Reference (e.g. Matthew 17:21): " ref </dev/tty
   [[ -z "$ref" ]] && return
   read -rp "Source (greek/hebrew/version) [greek]: " src </dev/tty
-  read -rp "Target language [en]: " tgt </dev/tty
+  choice=$(pick_from_list "Target language:" \
+    "Norsk" "English" "Español" "Français" "Deutsch" \
+    "Svenska" "Dansk" "Italiano" "Português" "Nederlands" "Custom…")
+  case "$choice" in
+    "" ) return ;;
+    "Custom…")
+      read -rp "Target code (e.g. no, fi, is): " tgt </dev/tty
+      [[ -z "$tgt" ]] && return
+      ;;
+    *)
+      for e in "${_LANGS[@]}"; do
+        if [[ "$(cut -d'|' -f1 <<<"$e")" == "$choice" ]]; then
+          tgt="$(cut -d'|' -f2 <<<"$e")"
+          break
+        fi
+      done
+      ;;
+  esac
+  engine=$(pick_from_list "Engine (now: $TRANS_ENGINE):" "google" "bing")
+  if [[ -n "$engine" ]]; then
+    TRANS_ENGINE="$engine"
+  fi
   # shellcheck disable=SC2086
-  translate $ref "${src:-greek}" "${tgt:-en}"
+  translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE"
   pause
 }
 
