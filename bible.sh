@@ -1157,19 +1157,34 @@ compare() {
 }
 
 translate() {
-  # Usage: translate REF... SRC TGT [ENGINE]
+  # Usage: translate REF... SRC TGT [ENGINE] [brief|full]
   # ENGINE is google (default) or bing; also via TRANS_ENGINE env.
-  local lang_arg='' target_arg='' engine="${TRANS_ENGINE:-google}"
+  # Brief output is the default; full restores trans' verbose
+  # dictionaries (also via TRANS_VERBOSE=1).
+  local lang_arg='' target_arg='' engine="${TRANS_ENGINE:-google}" verbose=false
+  # Blank palette: translation output is always color-free (dynamic
+  # scope carries this into bible(); trans gets -no-ansi below).
+  local GREEN='' YELLOW='' BLUE='' BOLD='' DIM='' NC=''
   local n=$#
   local target_idx=$n lang_idx=$((n - 1))
   local last=""
   if (( n >= 1 )); then
     last="${*:$n:1}"
   fi
+  if [[ "$last" == "brief" || "$last" == "full" ]] && (( n >= 4 )); then
+    [[ "$last" == "full" ]] && verbose=true
+    ((n--))
+    target_idx=$n
+    lang_idx=$((n - 1))
+    last="${*:$n:1}"
+  fi
   if [[ "$last" == "google" || "$last" == "bing" ]] && (( n >= 4 )); then
     engine="$last"
     target_idx=$((n - 1))
     lang_idx=$((n - 2))
+  fi
+  if [[ -n "${TRANS_VERBOSE:-}" ]]; then
+    verbose=true
   fi
   if (( target_idx >= 2 )); then
     target_arg="${*:target_idx:1}"
@@ -1186,7 +1201,11 @@ translate() {
   fi
   if [[ $(command -v 'trans') ]]
   then
-    bible "${@:1:target_idx-2}" "$version" trans | trans -e "$engine" :"$target_arg"
+    if [[ "$verbose" == true ]]; then
+      bible "${@:1:target_idx-2}" "$version" trans | trans -no-ansi -e "$engine" :"$target_arg"
+    else
+      bible "${@:1:target_idx-2}" "$version" trans | trans -no-ansi -b -e "$engine" :"$target_arg"
+    fi
   else
     echo "translate-shell is not installed..."
     echo "install with apt install translate-shell"
@@ -1203,11 +1222,14 @@ usage() {
   --listen    | -l     bible -l Isaiah 54 KJV
   --compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
                        or bible -c Isaiah 54:17 [en|no]
-  --translate | -t     bible -t Matthew 17:21 greek en [google|bing]
+  --translate | -t     bible -t Matthew 17:21 greek en [google|bing] [brief|full]
                        or bible -t Isaiah 54:17 hebrew en
                        (greek: TR1624, NT only. hebrew: OT only.
                         engine: google default, bing alternative;
-                        TRANS_ENGINE env also works)
+                        TRANS_ENGINE env also works. Brief clean
+                        output by default; full restores verbose
+                        dictionaries, TRANS_VERBOSE=1 too. Output
+                        is always color-free.)
 EOF
 }
 

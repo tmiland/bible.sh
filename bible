@@ -255,8 +255,17 @@ menu_translate() {
   if [[ -n "$engine" ]]; then
     TRANS_ENGINE="$engine"
   fi
+  out=$(pick_from_list "Output (now: ${TRANS_VERBOSE:-brief}):" "brief" "full")
+  case "$out" in
+    full) TRANS_VERBOSE=1 ;;
+    brief) TRANS_VERBOSE="" ;;
+  esac
   # shellcheck disable=SC2086
-  translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE"
+  if [[ -n "$out" ]]; then
+    translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE" "$out"
+  else
+    translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE"
+  fi
   pause
 }
 
