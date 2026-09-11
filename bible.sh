@@ -693,6 +693,18 @@ chapter_usfms() {
     | awk '!seen[$0]++' || true
 }
 
+chapter_text() {
+  # $1 = chapter html file, $2 = "BOOK.CH" — prints "N text" per verse.
+  local usfm vnum vtext
+  while IFS= read -r usfm; do
+    vnum="${usfm##*.}"
+    vtext=$(verse_text "$1" "$usfm")
+    if [[ -n "$vtext" ]]; then
+      printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w ${width} -s)"
+    fi
+  done < <(chapter_usfms "$1" "$2")
+}
+
 output_correction() {
   # Strip unwanted symbol from version
   if [[ $version == "N78BM" ]]
@@ -919,7 +931,22 @@ listen() {
   echo -n "$listen_mp3_headline"
   printf "\n"
   printf "\n"
-  echo "$listen_mp3_transcript" | fold -w ${width} -s
+  # Numbered verses via the chapter text when available; the raw
+  # audio transcript has no verse numbers, keep it as fallback.
+  listen_text_tmp=$(mktemp)
+  tmp_files+=("$listen_text_tmp")
+  if curl -s \
+    --compressed \
+    -H 'Accept: */*' \
+    -H "Cookie: version=$num" \
+    -H 'Pragma: no-cache' \
+    -H 'Cache-Control: no-cache' \
+    "https://www.bible.com/bible/$num/$bible_book.$chapter.$version" > "$listen_text_tmp" 2>/dev/null \
+    && [[ -n "$(chapter_usfms "$listen_text_tmp" "$bible_book.$chapter")" ]]; then
+    chapter_text "$listen_text_tmp" "$bible_book.$chapter"
+  else
+    echo "$listen_mp3_transcript" | fold -w ${width} -s
+  fi
   printf "\n"
   printf "\n"
   echo "$listen_mp3_link"

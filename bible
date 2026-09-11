@@ -161,17 +161,11 @@ browse_books() {
 }
 show_chapter() {
   # $1=OSIS $2=chapter $3=version $4=display name (optional)
-  local osis="$1" ch="$2" ver="$3" dname="${4:-$1}" usfm vnum vtext
+  local osis="$1" ch="$2" ver="$3" dname="${4:-$1}"
   version="$ver"
   version_case
   get_bible_chapter "$osis" "$ch" "$ver"
-  while IFS= read -r usfm; do
-    vnum="${usfm##*.}"
-    vtext=$(verse_text "$tmp" "$usfm")
-    if [[ -n "$vtext" ]]; then
-      printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w ${width} -s)"
-    fi
-  done < <(chapter_usfms "$tmp" "$osis.$ch")
+  chapter_text "$tmp" "$osis.$ch"
   printf "\n${GREEN}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$dname" "$ch" "$ver"
   printf "${BLUE}https://www.bible.com/bible/%s/%s.%s.%s${NC}\n\n" "$num" "$osis" "$ch" "$ver"
 }
