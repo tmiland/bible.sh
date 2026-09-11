@@ -114,16 +114,14 @@ home_verse() {
 
 home_header() {
   local streak
-  divider_line
-  printf "${BOLD}✝ %s${NC}\n" "$(greeting)"
-  printf "${DIM}%s${NC}\n" "$(date +"%A %-d %B")"
+  printf "\n${BOLD}✝ %s${NC}  ${DIM}%s${NC}" "$(greeting)" "$(date +"%A %-d %B")"
   streak=$(day_streak)
   if [[ -n "$streak" ]]; then
-    printf "${DIM}%s-day reading streak — keep going${NC}\n" "$streak"
+    printf "  ${DIM}· %s-day streak${NC}" "$streak"
   fi
-  divider_line
+  printf "\n\n"
   home_verse
-  divider_line
+  printf "\n"
 }
 
 save_place() {
@@ -462,36 +460,73 @@ menu_translate() {
   done
 }
 
+hotkey_label() {
+  # $1 = key, $2 = label → label with the key letter highlighted.
+  local key="${1,,}" ll tmp pos
+  ll="${2,,}"
+  tmp="${ll%%"$key"*}"
+  if [[ "$tmp" == "$ll" ]]; then
+    printf '%s (%s)' "$2" "$1"
+    return
+  fi
+  pos=${#tmp}
+  printf '%s%s%s%s%s' "${2:0:pos}" "${BOLD}${GREEN}" "${2:pos:1}" "${NC}" "${2:pos+1}"
+}
+
+menu_votd() {
+  votd "$DEF_VERSION"
+  pause
+}
+
 main_menu() {
-  local choice cont
-  local -a items
   mkdir -p "$BIBLE_CACHE"
   home_header
+  local key i item found
+  local -a keys actions labels
   while true; do
-    items=("Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
-    cont=$(continue_label)
-    if [[ -n "$cont" ]]; then
-      choice=$(pick_from_list "✝ bible — $DEF_VERSION" "$cont" "${items[@]}")
-      if [[ "$choice" == "$cont" ]]; then
-        continue_place
-        continue
-      fi
-    else
-      choice=$(pick_from_list "✝ bible — $DEF_VERSION" "${items[@]}")
+    # One compact bar: single keypress, no scrolling. Sub-pickers
+    # (books, versions, languages) still use fzf/numbered lists.
+    keys=()
+    actions=()
+    labels=()
+    item=$(continue_label)
+    if [[ -n "$item" ]]; then
+      keys+=(c)
+      actions+=(continue_place)
+      labels+=("$item")
     fi
-    case "$choice" in
-      Read) menu_read ;;
-      Favorites) menu_favorites ;;
-      Search) menu_search ;;
-      Compare) menu_compare ;;
-      Listen) menu_listen ;;
-      "Verse of the Day") votd "$DEF_VERSION"; pause ;;
-      Translate) menu_translate ;;
-      Version) menu_version ;;
-      Help) usage; pause ;;
-      *) return ;;
-    esac
+    keys+=(r f s m l v t e h)
+    actions+=(menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_help)
+    labels+=("Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
+    for i in "${!labels[@]}"; do
+      printf '%s  ' "$(hotkey_label "${keys[$i]}" "${labels[$i]}")" >&2
+    done
+    printf '%s\n' "$(hotkey_label q Quit)" >&2
+    printf '› ' >&2
+    IFS= read -rsn1 key </dev/tty
+    printf '\n' >&2
+    key="${key,,}"
+    if [[ -z "$key" || "$key" == $'\r' || "$key" == $'\n' ]]; then
+      key=c # Enter continues reading when there is somewhere to go
+    fi
+    if [[ "$key" == $'\x1b' || "$key" == q ]]; then
+      return
+    fi
+    found=false
+    for i in "${!keys[@]}"; do
+      if [[ "${keys[$i]}" == "$key" ]]; then
+        "${actions[$i]}"
+        found=true
+        break
+      fi
+    done
+    [[ "$found" == true ]] || printf "${DIM}Press h for help, q to quit.${NC}\n" >&2
   done
+}
+
+menu_help() {
+  usage
+  pause
 }
 
 # --- Entry -----------------------------------------------------------
