@@ -385,6 +385,34 @@ book_case() {
       bible_book_name="Malachi"
       bible_book="MAL"
       ;;
+    TOB|Tobit)
+      bible_book_name="Tobit"
+      bible_book="TOB"
+      ;;
+    JDT|Judith|Judit)
+      bible_book_name="Judith"
+      bible_book="JDT"
+      ;;
+    WIS|Wisdom|"Wisdom of Solomon"|Visdommen)
+      bible_book_name="Wisdom of Solomon"
+      bible_book="WIS"
+      ;;
+    BAR|Baruch|Baruk)
+      bible_book_name="Baruch"
+      bible_book="BAR"
+      ;;
+    1MA|"1 Maccabees"|1Maccabees|"1 Makkabeerbok"|1Makkabeerbok)
+      bible_book_name="1 Maccabees"
+      bible_book="1MA"
+      ;;
+    2MA|"2 Maccabees"|2Maccabees|"2 Makkabeerbok"|2Makkabeerbok)
+      bible_book_name="2 Maccabees"
+      bible_book="2MA"
+      ;;
+    BEL|"Bel and the Dragon"|Bel)
+      bible_book_name="Bel and the Dragon"
+      bible_book="BEL"
+      ;;
     MAT|Matthew|Matteus)
       bible_book_name="Matthew"
       bible_book="MAT"
