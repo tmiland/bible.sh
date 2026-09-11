@@ -1204,9 +1204,6 @@ translate() {
   local lang_arg='' target_arg='' engine="${TRANS_ENGINE:-google}" verbose=false
   local ref_display='' trans_out=''
   local -a trans_args=()
-  # Blank palette: translation output is always color-free (dynamic
-  # scope carries this into bible(); trans gets -no-ansi below).
-  local GREEN='' YELLOW='' BLUE='' BOLD='' DIM='' NC=''
   local n=$#
   local target_idx=$n lang_idx=$((n - 1))
   local last=""
@@ -1258,13 +1255,13 @@ translate() {
   if [[ $(command -v 'trans') ]]
   then
     ref_display="${*:1:target_idx-2}"
-    printf '\nTranslating %s (%s) -> %s [%s]\n\n' \
+    printf '\nTranslating %s (%s) -> %s [%s]\n' \
       "$ref_display" "$version" "$target_arg" "$engine" >&2
     trans_args=(-no-ansi -e "$engine" :"$target_arg")
     if [[ "$verbose" != true ]]; then
       trans_args=(-no-ansi -b -e "$engine" :"$target_arg")
     fi
-    trans_out=$(BIBLE_PLAIN=1 bible "${@:1:target_idx-2}" "$version" | trans "${trans_args[@]}")
+    trans_out=$(BIBLE_PLAIN=1 bible "${@:1:target_idx-2}" "$version" | trans "${trans_args[@]}") || true
     if grep -qiE '\[ERROR\]|Something went wrong|Potential Security Risk|Translator not found' <<<"$trans_out"; then
       # Transient engine failure (TLS/rate-limit): try the other one.
       if [[ "$engine" == "google" ]]; then
@@ -1277,9 +1274,15 @@ translate() {
       if [[ "$verbose" == true ]]; then
         trans_args=(-no-ansi -e "$engine" :"$target_arg")
       fi
-      trans_out=$(BIBLE_PLAIN=1 bible "${@:1:target_idx-2}" "$version" | trans "${trans_args[@]}")
+      trans_out=$(BIBLE_PLAIN=1 bible "${@:1:target_idx-2}" "$version" | trans "${trans_args[@]}") || true
     fi
-    printf '%s\n' "$trans_out"
+    if [[ -n "$trans_out" ]]; then
+      # Original above, translation below: two fetches, zero
+      # refactoring risk. Colors follow the terminal; the
+      # translation itself stays color-free (-no-ansi).
+      bible "${@:1:target_idx-2}" "$version"
+      printf '%s\n' "$trans_out"
+    fi
   else
     echo "translate-shell is not installed..."
     echo "install with apt install translate-shell"
