@@ -524,6 +524,21 @@ book_case() {
   esac
 }
 
+testament() {
+  # Echoes ot|nt|apo for the current $bible_book (OSIS), empty if unknown.
+  case "$bible_book" in
+    GEN|EXO|LEV|NUM|DEU|JOS|JDG|RUT|1SA|2SA|1KI|2KI|1CH|2CH|EZR|NEH|EST|JOB|PSA|PRO|ECC|SNG|ISA|JER|LAM|EZK|DAN|HOS|JOL|AMO|OBA|JON|MIC|NAM|HAB|ZEP|HAG|ZEC|MAL)
+      echo ot
+      ;;
+    MAT|MRK|LUK|JHN|ACT|ROM|1CO|2CO|GAL|EPH|PHP|COL|1TH|2TH|1TI|2TI|TIT|PHM|HEB|JAS|1PE|2PE|1JN|2JN|3JN|JUD|REV)
+      echo nt
+      ;;
+    TOB|JDT|WIS|BAR|1MA|2MA|BEL)
+      echo apo
+      ;;
+  esac
+}
+
 args() {
   local words=("$@")
   local i tok cv prev="" bookpart=""
@@ -669,15 +684,18 @@ verse_text() {
   # $1 = chapter html file, $2 = USFM (e.g. ISA.54.17).
   # First occurrence wins: later duplicates live in footer/share cards.
   # The file is folded to one line first because verse tags wrap
-  # their attributes across newlines.
-  # The verse chunk ends at the next verse marker or at the closing
-  # chapter divs (never at EOF: flight-data JSON would be swallowed).
+  # their attributes across newlines. Verse text is harvested from
+  # __content spans (this skips verse-number labels, footnote
+  # callers like "#", cross-ref notes and poetry wrappers, whose
+  # text all lives outside __content).
+  # The verse chunk ends at the next verse span or at the closing
+  # chapter divs (never at EOF: flight-data JSON would be swallowed;
+  # never at a bare data-usfm=: cross-ref notes carry those too).
   tr '\n' ' ' < "$1" \
-    | grep -Po "data-usfm=\"$2\">.*?(?=data-usfm=\"|</div>|<script)" | head -n 1 \
-    | sed 's|^[^>]*>||' \
-    | sed 's|<span class="[^"]*__label">[^<]*</span>||' \
+    | grep -Po "data-usfm=\"$2\">.*?(?=<span class=\"[^\"]*__verse\" data-usfm=\"|</div>|<script)" | head -n 1 \
+    | grep -Po '<span class="[^"]*__content">\K.*?(?=</span>)' \
+    | tr '\n' ' ' \
     | sed 's|<[^>]*>||g' \
-    | sed 's|<[^>]*$||' \
     | sed -e "s/&#x27;/'/g" -e 's/&#39;/'\''/g' -e 's/&quot;/"/g' \
       -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&nbsp;/ /g' -e 's/&amp;/\&/g' \
     | tr -s ' ' \
@@ -1216,6 +1234,20 @@ translate() {
   if (( lang_idx >= 3 )); then
     lang_arg="${*:lang_idx:1}"
   fi
+  if [[ "$lang_arg" == "auto" || -z "$lang_arg" ]]; then
+    # Resolve the source testament from the reference itself:
+    # Hebrew (OT) or Greek (NT). Needs book parsing first; bible()
+    # re-parses anyway, so no state leaks from here.
+    bible_book=""
+    if (( target_idx - 2 >= 1 )); then
+      args "${@:1:target_idx-2}"
+      book_case
+    fi
+    case "$(testament)" in
+      ot) lang_arg=hebrew ;;
+      nt) lang_arg=greek ;;
+    esac
+  fi
   if [[ "$lang_arg" == "hebrew" ]]; then
     version="תנ\"ך"
   elif [[ "$lang_arg" == "greek" ]]; then
@@ -1266,7 +1298,9 @@ usage() {
                        or bible -c Isaiah 54:17 [en|no]
   --translate | -t     bible -t Matthew 17:21 greek en [google|bing] [brief|full]
                        or bible -t Isaiah 54:17 hebrew en
-                       (greek: TR1624, NT only. hebrew: OT only.
+                       or bible -t John 3:16 auto no
+                       (auto = hebrew for OT, greek for NT.
+                        greek: TR1624, NT only. hebrew: OT only.
                         engine: google default, bing alternative;
                         TRANS_ENGINE env also works. Brief clean
                         output by default; full restores verbose

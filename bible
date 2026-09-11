@@ -272,16 +272,16 @@ menu_translate() {
   local ref src tgt out nav
   read -rp "Reference (e.g. Matthew 17:21): " ref </dev/tty
   [[ -z "$ref" ]] && return
-  read -rp "Source (greek/hebrew/version) [greek]: " src </dev/tty
+  read -rp "Source (auto/hebrew/greek/version) [auto]: " src </dev/tty
   pick_target || return
   pick_engine
   pick_output
   while true; do
     # shellcheck disable=SC2086
     if [[ -n "$out" ]]; then
-      translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE" "$out"
+      translate $ref ${src:-auto} "$tgt" "$TRANS_ENGINE" "$out"
     else
-      translate $ref "${src:-greek}" "$tgt" "$TRANS_ENGINE"
+      translate $ref ${src:-auto} "$tgt" "$TRANS_ENGINE"
     fi
     read -rp "[t]arget [e]ngine [o]utput [r]eference [q]uit: " nav </dev/tty
     case "$nav" in
@@ -291,7 +291,7 @@ menu_translate() {
       r|R)
         read -rp "Reference (e.g. Matthew 17:21): " ref </dev/tty
         [[ -z "$ref" ]] && return
-        read -rp "Source (greek/hebrew/version) [greek]: " src </dev/tty
+        read -rp "Source (auto/hebrew/greek/version) [auto]: " src </dev/tty
         ;;
       *) return ;;
     esac
