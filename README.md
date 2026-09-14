@@ -28,6 +28,33 @@ Reading position, streak days, favorites and the cached verse
 live under `~/.cache/bible/`. List picking uses fzf when
 installed, otherwise numbered menus (`NO_FZF=1` forces menus).
 
+## Offline Bible
+
+bible.sh can read, search and compare the King James Version fully
+offline. `bible install KJV` downloads the public-domain text once,
+then every `-b`, `-s`, `-c` and frontend Read/Listen lookup for KJV
+uses the local database — no internet needed.
+
+```shell
+bible install           # install KJV offline text
+bible install KJV       # same
+bible update            # refresh the local text
+bible status            # show installed versions
+```
+
+Data is stored in `~/.cache/bible/`:
+- `KJV.db` — SQLite with an FTS5 full-text index (fastest search)
+- `KJV.json` — automatic JSON fallback when `sqlite3` is not installed
+
+The verse text comes from [github.com/aruljohn/Bible-kjv]
+(https://github.com/aruljohn/Bible-kjv) (KJV, public domain), downloaded
+in parallel on install. Offline features work with either backend;
+`bible install --all` installs every supported offline version.
+Other versions (NIV, NORSK, …) and VOTD/Translate remain online-only.
+
+Set `BIBLE_ONLINE_ONLY=1` to force bible.com lookups even for an
+installed version.
+
 
 **Full write-up on the blog:** https://tmiland.com/bible-sh/
 ## Verse of the day
@@ -56,6 +83,9 @@ Arguments            Example usage
                      or bible -c Isaiah 54:17 [en|no]
 --translate | -t     bible -t Matthew 17:21 greek en
                      or bible -t Isaiah 54:17 hebrew en
+install              bible install [VERSION] [--all]
+update               bible update [VERSION] [--all]
+status               bible status
 ```
 
 ```shell
@@ -224,6 +254,7 @@ bible -s "<keywords>"
   * [Translate Shell](https://github.com/soimort/translate-shell)
   * Answer on stackexchange: [What is the fastest way to view images from the terminal?](https://unix.stackexchange.com/a/745334)
   * [Bash: Show Notifications from Scripts Using notify-send](https://delightlylinux.wordpress.com/2020/10/25/bash-show-notifications-from-scripts-using-notify-send/)
+- Offline KJV text: [Bible-kjv](https://github.com/aruljohn/Bible-kjv) (public domain)
 
 ## Donations
 <a href="https://coindrop.to/tmiland" target="_blank"><img src="https://coindrop.to/embed-button.png" style="border-radius: 10px; height: 57px !important;width: 229px !important;" alt="Coindrop.to me"></img></a>

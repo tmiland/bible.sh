@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Added
+- Offline Bible support (`bible_offline.sh`): local KJV storage under
+  `~/.cache/bible/` as SQLite (`KJV.db`, FTS5 full-text search) with a
+  JSON fallback (`KJV.json`, jq/grep search) when `sqlite3` is absent.
+- `bible install [VERSION] [--all]` and `bible update [VERSION] [--all]`
+  commands: download the public-domain KJV from
+  github.com/aruljohn/Bible-kjv (66 book files, parallel download) and
+  build the local database. `bible status` lists installed versions.
+- Offline-first routing: `bible()` (single verses and ranges), `search()`
+  and `compare()` return KJV from the local database; `listen()` renders
+  chapter text from it (audio unaffected). `BIBLE_ONLINE_ONLY=1` forces
+  bible.com lookups.
+- Frontend: `[o]ffline` menu (status, install/update/reinstall KJV) and
+  CLI passthrough for install/update/status.
+
 ## [1.1.0] - 2026-09-11
 
 ### Added
