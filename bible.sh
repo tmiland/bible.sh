@@ -936,8 +936,39 @@ bible() {
   fi
 }
 
+audio_seek() {
+  # $1=web version num, $2=USFM ref "GEN.1", $3=verse or "V1-V2",
+  # $4=CDN mp3 filename (optional, to pick the matching narrator)
+  # Echoes "<start> <end>" seconds into the chapter mp3, or nothing.
+  local num="$1" ref="$2" sel="$3" fname="$4"
+  local v1="${sel%-*}" v2="${sel#*-}" timing st en
+  timing=$(curl -s "http://audio-bible.youversionapi.com/3.1/chapter.json?version_id=$num&reference=$ref")
+  [[ -n "$timing" ]] || return 1
+  if [[ -n "$fname" ]]; then
+    st=$(jq -r --arg f "$fname" --arg u "$ref.$v1" '
+      .response.data[]? as $d |
+      select(($d.download_urls.format_mp3_32k // "") | contains($f)) |
+      $d.timing[]? | select(.usfm == $u) | .start' <<<"$timing" | head -n 1)
+    en=$(jq -r --arg f "$fname" --arg u "$ref.$v2" '
+      .response.data[]? as $d |
+      select(($d.download_urls.format_mp3_32k // "") | contains($f)) |
+      $d.timing[]? | select(.usfm == $u) | .end' <<<"$timing" | head -n 1)
+  fi
+  if [[ -z "$st" ]]; then
+    st=$(jq -r --arg u "$ref.$v1" \
+      '.response.data[0].timing[]? | select(.usfm == $u) | .start' <<<"$timing" | head -n 1)
+  fi
+  if [[ -z "$en" ]]; then
+    en=$(jq -r --arg u "$ref.$v2" \
+      '.response.data[0].timing[]? | select(.usfm == $u) | .end' <<<"$timing" | head -n 1)
+  fi
+  if [[ -n "$st" && -n "$en" ]]; then
+    echo "$st $en"
+  fi
+}
+
 listen() {
-  local num=
+  local num= seek_start= seek_end=
   listen_mp3_tmp=$(mktemp)
   tmp_files+=("$listen_mp3_tmp")
   args "$@"
@@ -990,6 +1021,19 @@ listen() {
     exit 0
   fi
 
+  # Verse-seek: when a verse (or range) is requested, play only that
+  # span of the chapter mp3 using the YouVersion audio timing API.
+  if [[ -n "$verse" ]]; then
+    read -r seek_start seek_end <<< "$(audio_seek "$num" "$bible_book.$chapter" "$verse" "$listen_mp3_filename")"
+    if [[ -n "$seek_start" ]]; then
+      if [[ "${player[0]}" == vlc ]]; then
+        player+=(--start-time="$seek_start" --stop-time="$seek_end")
+      else
+        player+=(-ss "$seek_start" -t "$(awk "BEGIN{printf \"%.2f\", $seek_end - $seek_start}")")
+      fi
+    fi
+  fi
+
   chapter_pad=$(printf '%02d' "$chapter")
   if ! [ -d "$audio_folder"/"$version"/"$bible_book_name" ]; then
     mkdir -p "$audio_folder"/"$version"/"$bible_book_name"
@@ -1027,11 +1071,21 @@ listen() {
   printf "\n"
   # Numbered verses via the local database when available; otherwise
   # via the chapter text page, falling back to the raw transcript
-  # (which has no verse numbers).
-  local local_usfms
+  # (which has no verse numbers).  When a verse (or range) was given,
+  # only the selected verses are shown.
+  local local_usfms vstart vend v vtext
   local_usfms=$(local_chapter_verses "$bible_book" "$chapter" "$version" 2>/dev/null)
   if [[ -n "$local_usfms" ]]; then
-    local_chapter_text "$bible_book" "$chapter" "$version"
+    if [[ -n "$verse" ]]; then
+      vstart="${verse%-*}"
+      vend="${verse#*-}"
+      for (( v=vstart; v<=vend; v++ )); do
+        vtext=$(local_verse "$bible_book" "$chapter" "$v" "$version")
+        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC} %s\n" "$v" "$(echo "$vtext" | fold -w ${width} -s)"
+      done
+    else
+      local_chapter_text "$bible_book" "$chapter" "$version"
+    fi
   else
     listen_text_tmp=$(mktemp)
     tmp_files+=("$listen_text_tmp")
@@ -1043,7 +1097,16 @@ listen() {
       -H 'Cache-Control: no-cache' \
       "https://www.bible.com/bible/$num/$bible_book.$chapter.$version" > "$listen_text_tmp" 2>/dev/null \
       && [[ -n "$(chapter_usfms "$listen_text_tmp" "$bible_book.$chapter")" ]]; then
-      chapter_text "$listen_text_tmp" "$bible_book.$chapter"
+      if [[ -n "$verse" ]]; then
+        vstart="${verse%-*}"
+        vend="${verse#*-}"
+        for (( v=vstart; v<=vend; v++ )); do
+          vtext=$(verse_text "$listen_text_tmp" "$bible_book.$chapter.$v")
+          [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC} %s\n" "$v" "$(echo "$vtext" | fold -w ${width} -s)"
+        done
+      else
+        chapter_text "$listen_text_tmp" "$bible_book.$chapter"
+      fi
     else
       echo "$listen_mp3_transcript" | fold -w ${width} -s
     fi
