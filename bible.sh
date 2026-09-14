@@ -41,6 +41,14 @@
 
 audio_folder="$HOME/Audio/Listen Bible"
 
+# Offline Bible support — local SQLite/JSON storage with install,
+# update and query functions. Sourced when present next to this file.
+_OFFLINE_DIR="$(dirname "${BASH_SOURCE[0]}")"
+if [[ -f "$_OFFLINE_DIR/bible_offline.sh" ]]; then
+  # shellcheck source=bible_offline.sh
+  source "$_OFFLINE_DIR/bible_offline.sh"
+fi
+
 # When sourced as a library (e.g. by the `bible` frontend), skip the
 # CLI-only bits: caller's "$@" must not be rewritten or dispatched on.
 _BIBLE_LIB=false
@@ -797,6 +805,52 @@ bible() {
     exit 0
   fi
 
+  # Offline-first: use the local database when the requested version
+  # is installed locally (and thus not an original-language version).
+  # Set BIBLE_ONLINE_ONLY=1 to force bible.com lookups regardless.
+  if [[ -z "${BIBLE_ONLINE_ONLY:-}" ]] \
+    && [[ "$version" == "KJV" ]] \
+    && [[ -n "$bible_book" ]] && [[ -n "$chapter" ]] \
+    && _offline_is_installed "KJV"; then
+
+    if [ -n "$verse_range" ]; then
+      description=$(local_range_text "$bible_book" "$chapter" "$verse_range" "KJV")
+      chapter_verse="$chapter:$verse_range"
+    elif [[ "$verse" =~ ^[[:digit:]]+$ ]]; then
+      description=$(local_verse "$bible_book" "$chapter" "$verse" "KJV")
+      chapter_verse="$chapter:$verse"
+    else
+      description=""
+    fi
+
+    if [[ -n "$description" ]]; then
+      page_h1="${bible_book_name}"
+      book="$bible_book_name"
+      link="https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
+
+      # Strip unwanted symbol from version
+      if [[ $version == "N78BM" ]]
+      then
+        description=${description//¬/}
+      fi
+
+      # Strip quotes from description if any
+      if [[ $description =~ $BQUOTE ]] ||
+      [[ $description =~ $EQUOTE ]]
+      then
+        BQUOTE=''
+        EQUOTE=''
+      fi
+
+      # Fold description to set width
+      description_folded=$(echo "$description" | fold -w ${width} -s)
+
+      output "$description_folded" "$book" "$chapter_verse" "$version" "$link"
+      return 0
+    fi
+    # Fall through to online if the local DB has no such verse
+  fi
+
   get_bible_chapter "$bible_book" "$chapter" "$version"
 
   # Chapter pages server-render every verse as <span data-usfm>.
@@ -971,21 +1025,28 @@ listen() {
   echo -n "$listen_mp3_headline"
   printf "\n"
   printf "\n"
-  # Numbered verses via the chapter text when available; the raw
-  # audio transcript has no verse numbers, keep it as fallback.
-  listen_text_tmp=$(mktemp)
-  tmp_files+=("$listen_text_tmp")
-  if curl -s \
-    --compressed \
-    -H 'Accept: */*' \
-    -H "Cookie: version=$num" \
-    -H 'Pragma: no-cache' \
-    -H 'Cache-Control: no-cache' \
-    "https://www.bible.com/bible/$num/$bible_book.$chapter.$version" > "$listen_text_tmp" 2>/dev/null \
-    && [[ -n "$(chapter_usfms "$listen_text_tmp" "$bible_book.$chapter")" ]]; then
-    chapter_text "$listen_text_tmp" "$bible_book.$chapter"
+  # Numbered verses via the local database when available; otherwise
+  # via the chapter text page, falling back to the raw transcript
+  # (which has no verse numbers).
+  local local_usfms
+  local_usfms=$(local_chapter_verses "$bible_book" "$chapter" "$version" 2>/dev/null)
+  if [[ -n "$local_usfms" ]]; then
+    local_chapter_text "$bible_book" "$chapter" "$version"
   else
-    echo "$listen_mp3_transcript" | fold -w ${width} -s
+    listen_text_tmp=$(mktemp)
+    tmp_files+=("$listen_text_tmp")
+    if curl -s \
+      --compressed \
+      -H 'Accept: */*' \
+      -H "Cookie: version=$num" \
+      -H 'Pragma: no-cache' \
+      -H 'Cache-Control: no-cache' \
+      "https://www.bible.com/bible/$num/$bible_book.$chapter.$version" > "$listen_text_tmp" 2>/dev/null \
+      && [[ -n "$(chapter_usfms "$listen_text_tmp" "$bible_book.$chapter")" ]]; then
+      chapter_text "$listen_text_tmp" "$bible_book.$chapter"
+    else
+      echo "$listen_mp3_transcript" | fold -w ${width} -s
+    fi
   fi
   printf "\n"
   printf "\n"
@@ -1113,6 +1174,14 @@ search() {
 
   if [ -z "$version" ]; then
     num=1
+  fi
+
+  # Offline-first: search the local database when the requested
+  # version is installed locally.
+  if [[ "$version" == "KJV" ]] && _offline_is_installed "KJV"; then
+    if local_search "$query" "$version"; then
+      return 0
+    fi
   fi
 
   get_url_id=$(
@@ -1311,6 +1380,14 @@ usage() {
                         output by default; full restores verbose
                         dictionaries, TRANS_VERBOSE=1 too. Output
                         is always color-free.)
+  install              bible install [VERSION] [--all]
+                       Download a version for offline use
+                       (KJV is the only offline version; --all
+                       installs every supported offline version).
+  update               bible update [VERSION] [--all]
+                       Refresh a locally installed version.
+  status               bible status
+                       Show locally installed versions.
 EOF
 }
 
@@ -1351,6 +1428,20 @@ do
     --translate | -t)
       shift
       translate "$@"
+      exit 0
+      ;;
+    install)
+      shift
+      install_version "${1:-KJV}" "${2:-}"
+      exit $?
+      ;;
+    update)
+      shift
+      update_version "${1:-KJV}" "${2:-}"
+      exit $?
+      ;;
+    status | offline)
+      offline_status
       exit 0
       ;;
     --* | -*)

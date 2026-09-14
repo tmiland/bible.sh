@@ -292,6 +292,17 @@ show_chapter() {
   local osis="$1" ch="$2" ver="$3" dname="${4:-$1}"
   version="$ver"
   version_case
+  # Offline-first: render from the local database when installed.
+  if [[ "$ver" == "KJV" ]] && _offline_is_installed "KJV"; then
+    local usfms
+    usfms=$(local_chapter_verses "$osis" "$ch" "$ver")
+    if [[ -n "$usfms" ]]; then
+      local_chapter_text "$osis" "$ch" "$ver"
+      printf "\n${GREEN}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$dname" "$ch" "$ver"
+      printf "${BLUE}https://www.bible.com/bible/%s/%s.%s.%s${NC}\n\n" "$num" "$osis" "$ch" "$ver"
+      return
+    fi
+  fi
   get_bible_chapter "$osis" "$ch" "$ver"
   chapter_text "$tmp" "$osis.$ch"
   printf "\n${GREEN}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$dname" "$ch" "$ver"
@@ -348,6 +359,24 @@ menu_read() {
     "New Testament") browse_books _NT "$DEF_VERSION" ;;
     "Apocrypha (KJVAAE)") browse_books _APO KJVAAE ;;
   esac
+}
+
+menu_offline() {
+  local choice
+  offline_status
+  echo ""
+  if _offline_is_installed "KJV"; then
+    choice=$(pick_from_list "Offline Bible:" "Update KJV" "Reinstall KJV")
+    case "$choice" in
+      "Update KJV") update_version "KJV"; pause ;;
+      "Reinstall KJV") _fetch_and_build "KJV"; pause ;;
+    esac
+  else
+    choice=$(pick_from_list "Offline Bible:" "Install KJV (offline read/search)")
+    case "$choice" in
+      "Install KJV (offline read/search)") install_version "KJV"; pause ;;
+    esac
+  fi
 }
 
 menu_version() {
@@ -495,9 +524,9 @@ main_menu() {
       actions+=(continue_place)
       labels+=("$item")
     fi
-    keys+=(r f s m l v t e h)
-    actions+=(menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_help)
-    labels+=("Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Help")
+    keys+=(r f s m l v t e o h)
+    actions+=(menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
+    labels+=("Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
     for i in "${!labels[@]}"; do
       printf '%s  ' "$(hotkey_label "${keys[$i]}" "${labels[$i]}")" >&2
     done
@@ -540,6 +569,9 @@ if [[ $# -gt 0 ]]; then
     --listen | -l) shift; listen "$@" ;;
     --compare | -c) shift; compare "$@" ;;
     --translate | -t) shift; translate "$@" ;;
+    install) shift; install_version "${1:-KJV}" "${2:-}" ;;
+    update) shift; update_version "${1:-KJV}" "${2:-}" ;;
+    status) offline_status ;;
     *) usage; exit 1 ;;
   esac
   exit 0
