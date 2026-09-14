@@ -70,7 +70,7 @@ DEF_VERSION="KJV"
 TRANS_ENGINE="google"
 
 # --- Home: greeting, daily verse, continue reading --------------------
-BIBLE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/bible"
+BIBLE_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}"
 BIBLE_LAST="$BIBLE_CACHE/last"
 
 greeting() {

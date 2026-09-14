@@ -1170,6 +1170,11 @@ search() {
   num=
   query=${1:-}
   version=${2:-}
+
+  # Default to KJV when no version was given (mirrors args()).
+  if [[ -z "$version" ]]; then
+    version="KJV"
+  fi
   version_case
 
   if [ -z "$version" ]; then

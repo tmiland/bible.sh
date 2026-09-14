@@ -11,7 +11,8 @@
 ######################################################################
 
 # --- Paths -----------------------------------------------------------
-BIBLE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/bible"
+# Respect an already-set BIBLE_CACHE (allows env override for testing).
+BIBLE_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}"
 width="${width:-80}"
 
 _offline_db()   { echo "$BIBLE_CACHE/$1.db"; }
