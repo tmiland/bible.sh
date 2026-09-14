@@ -49,6 +49,23 @@ if [[ -f "$_OFFLINE_DIR/bible_offline.sh" ]]; then
   source "$_OFFLINE_DIR/bible_offline.sh"
 fi
 
+# YouVersion Platform API support — key-gated read/search via
+# api.youversion.com. Active only when an app key is configured
+# ($YVP_APP_KEY or ~/.credentials/.bible.com_token) and the requested
+# version is licensed to it; otherwise the scraping paths stay as-is.
+if [[ -f "$_OFFLINE_DIR/bible_api.sh" ]]; then
+  # shellcheck source=bible_api.sh
+  source "$_OFFLINE_DIR/bible_api.sh"
+fi
+
+# YouVersion Highlights — OAuth PKCE + data-exchange approval flow and
+# /v1/highlights CRUD (favorites/notes). Requires its own client
+# config on top of the app key; see `bible hl login --help`.
+if [[ -f "$_OFFLINE_DIR/bible_highlights.sh" ]]; then
+  # shellcheck source=bible_highlights.sh
+  source "$_OFFLINE_DIR/bible_highlights.sh"
+fi
+
 # When sourced as a library (e.g. by the `bible` frontend), skip the
 # CLI-only bits: caller's "$@" must not be rewritten or dispatched on.
 _BIBLE_LIB=false
@@ -851,6 +868,43 @@ bible() {
     # Fall through to online if the local DB has no such verse
   fi
 
+  # API-first: when an app key is set and the requested version is
+  # licensed to it, read via the official Platform API (clean text,
+  # no scraping). Falls back to the chapter-page path below on any
+  # failure — that path stays byte-for-byte untouched as the default.
+  if [[ -z "${BIBLE_ONLINE_ONLY:-}" ]]; then
+    local api_id api_usfm api_desc
+    if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
+      if [[ -n "$verse_range" ]]; then
+        api_usfm="$bible_book.$chapter.$verse_range"
+      elif [[ "$verse" =~ ^[[:digit:]]+$ ]]; then
+        api_usfm="$bible_book.$chapter.$verse"
+      else
+        api_usfm="$bible_book.$chapter"
+      fi
+      if api_desc=$(_yvp_passage_text "$api_id" "$api_usfm" 2>/dev/null) && [[ -n "$api_desc" ]]; then
+        description="$api_desc"
+        book="$bible_book_name"
+        chapter_verse="$chapter"
+        if [[ -n "$verse_range" ]]; then
+          chapter_verse+=":$verse_range"
+        else
+          chapter_verse+=":$verse"
+        fi
+        link="https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
+        # Mirrors the scraping tail: drop the quote wrappers when the
+        # passage text already carries curly quotes (AMP et al.).
+        if [[ $description =~ $BQUOTE ]] || [[ $description =~ $EQUOTE ]]; then
+          BQUOTE=''
+          EQUOTE=''
+        fi
+        output_correction
+        output "$description" "$book" "$chapter_verse" "$version" "$link"
+        return 0
+      fi
+    fi
+  fi
+
   get_bible_chapter "$bible_book" "$chapter" "$version"
 
   # Chapter pages server-render every verse as <span data-usfm>.
@@ -1250,6 +1304,41 @@ search() {
     if local_search "$query" "$version"; then
       return 0
     fi
+  fi
+
+  # API-first search: when an app key is set and the requested
+  # version is licensed to it, search the official Platform API and
+  # render each matched reference. Falls back to the bible.com
+  # scraping search below on any failure.
+  local api_id api_ref api_desc api_book api_cv api_link
+  if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
+    echo ""
+    echo "Search results from YouVersion Platform API"
+    echo ""
+    divider_line
+    while IFS= read -r api_ref; do
+      [[ -z "$api_ref" ]] && continue
+      api_desc=$(_yvp_passage_text "$api_id" "$api_ref" 2>/dev/null)
+      [[ -n "$api_desc" ]] || continue
+      api_book=$(_yvp_book_name "${api_ref%%.*}")
+      api_cv="${api_ref#*.}"
+      api_cv="${api_cv%%.*}:${api_cv##*.}"
+      api_link="https://www.bible.com/bible/$num/$api_ref.$version"
+      description="$api_desc"
+      book="$api_book"
+      chapter_verse="$api_cv"
+      version="$version"
+      link="$api_link"
+      if [[ $description =~ $BQUOTE ]] || [[ $description =~ $EQUOTE ]]; then
+        BQUOTE=''
+        EQUOTE=''
+      fi
+      output_correction
+      output "$description" "$book" "$chapter_verse" "$version" "$link"
+      divider_line
+      sleep 0.1
+    done < <(_yvp_search "$api_id" "$query" 3)
+    return 0
   fi
 
   get_url_id=$(

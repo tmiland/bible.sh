@@ -18,6 +18,19 @@ All notable changes to this project are documented in this file.
   bible.com lookups.
 - Frontend: `[o]ffline` menu (status, install/update/reinstall KJV) and
   CLI passthrough for install/update/status.
+- YouVersion Platform API support (`bible_api.sh`): key-gated read and
+  search via api.youversion.com. Active only when an app key is set
+  (`YVP_APP_KEY` or `~/.credentials/.bible.com_token`) and the requested
+  version is licensed to that key (20 English versions, incl. AMP, NIV,
+  GNV); every failure falls back to the existing bible.com paths. Version
+  licenses are discovered via `/v1/bibles` and TTL-cached; passages use
+  `/v1/bibles/{id}/passages/{usfm}?format=text`; search uses
+  `/v1/search-verses`. New module sourced by bible.sh when present.
+- `bible hl` / `bible highlights` scaffolding (`bible_highlights.sh`):
+  full OAuth PKCE login + data-exchange approval flow and
+  `/v1/highlights` CRUD (list/add/delete), gated on an app key plus a
+  registered OAuth client (`YVP_CLIENT_ID`, `YVP_REDIRECT_URI`). Without
+  those, commands print setup instructions.
 
 ## [1.1.0] - 2026-09-11
 

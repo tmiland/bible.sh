@@ -572,6 +572,17 @@ if [[ $# -gt 0 ]]; then
     install) shift; install_version "${1:-KJV}" "${2:-}" ;;
     update) shift; update_version "${1:-KJV}" "${2:-}" ;;
     status) offline_status ;;
+    hl|highlights)
+      shift
+      case "${1:-status}" in
+        login) shift; hl_login ;;
+        approve) shift; hl_approve ;;
+        list) shift; hl_list "${1:-}" ;;
+        add) shift; hl_add "$@" ;;
+        delete|rm) shift; hl_delete "${1:-}" ;;
+        *) hl_status ;;
+      esac
+      ;;
     *) usage; exit 1 ;;
   esac
   exit 0
