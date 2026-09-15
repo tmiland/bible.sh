@@ -2822,48 +2822,53 @@ translate() {
 
 usage() {
   cat <<EOF
+bible.sh — the whole Bible in one shell file.
+
+  Run with no arguments for the interactive app: Read (Continue,
+  proverb-a-day, reading plans, the Lord's prayer), Listen (its audio
+  mirror), Search, Compare, Verse of the Day, Translate, Version,
+  Offline and Help. Arrow keys →/← work like [n]ext/[p]rev in every
+  chapter loop; Enter resumes Continue; update hints show in the header.
+
   Arguments            Example usage
-  --help      | -h     Show this help text.
+  --help      | -h     Show this help.
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
   --votd      | -v     bible -v
   proverb              bible proverb
-                       The chapter of Proverbs matching today's date
-                       (menu: Read → "A proverb a day"), with
-                       [r]ead / [l]isten prompt.
-  --saved     | -a     bible saved
-                       Interactive "Are You Saved?" gospel walkthrough —
-                       self-directed: follow the questioning method of
-                       Ray Comfort (Living Waters, Way of the Master)
-                       through the Law, judgment and grace to an answer.
+                       Read today's chapter of Proverbs (31 chapters,
+                       one per day; menu: Read → "A proverb a day").
   --listen    | -l     bible -l Isaiah 54 KJV
   --compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
                        or bible -c Isaiah 54:17 [en|no]
+  --saved     | -a     bible saved
+                       Interactive "Are You Saved?" gospel walkthrough —
+                       self-directed, following the questioning method
+                       of Ray Comfort (Living Waters, Way of the Master).
   --translate | -t     bible -t Matthew 17:21 greek en [google|bing] [brief|full]
                        or bible -t Isaiah 54:17 hebrew en
                        or bible -t John 3:16 auto no
-                       (auto = hebrew for OT, greek for NT.
-                        greek: TR1624, NT only. hebrew: OT only.
-                        engine: google default, bing alternative;
-                        TRANS_ENGINE env also works. Brief clean
-                        output by default; full restores verbose
-                        dictionaries, TRANS_VERBOSE=1 too. Output
-                        is always color-free.)
+                       auto source = hebrew (OT) / greek (NT; TR1624,
+                       NT only); engine default google, else bing
+                       (TRANS_ENGINE works too); brief clean color-free
+                       output by default, full restores dictionaries.
   install              bible install [VERSION] [--all]
-                       Download a version for offline use
-                       (KJV is the only offline version; --all
-                       installs every supported offline version).
+                       Download a version for offline use (KJV is the
+                       only offline version).
   update               bible update [VERSION] [--all]
                        Refresh a locally installed version.
-status               bible status
-                        Show locally installed versions.
+  status               bible status
+                       Show locally installed versions.
+  hl | highlights      bible hl list | add ... | delete ... | login
+                       Manage YouVersion highlights (OAuth).
   self-update | -u     bible self-update
-                        Update this script itself from the GitHub repo.
-                        Compares the VERSION header against latest main,
-                        syntax-checks the download, then swaps it in
-                        atomically. SELF_UPDATE_YES=1 skips the prompt.
-  --no-update-check      Launch without checking for updates
-                        (BIBLE_NO_UPDATE_CHECK=1 does the same).
+                       Update this script from the GitHub repo: compares
+                       the VERSION header, syntax-checks the download,
+                       then swaps it in atomically. SELF_UPDATE_YES=1
+                       skips the prompt; launch checks are cached for
+                       SELF_UPDATE_TTL seconds (default 6h).
+  --no-update-check    Launch without checking for updates
+                       (BIBLE_NO_UPDATE_CHECK=1 does the same).
 EOF
 }
 
