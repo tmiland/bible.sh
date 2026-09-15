@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Added
+- `bible self-update` (`-u`): fetch the latest `bible.sh` from the
+  GitHub repo, compare the `VERSION` header, bash syntax-check the
+  download and swap it in atomically. Prompts before overwriting
+  (`SELF_UPDATE_YES=1` skips); falls back to a one-line curl command
+  when the installed copy is not writable. The updater is a portable
+  block — override `SELF_UPDATE_URL` to reuse it in other scripts.
+
 ## [1.2.0] - 2026-09-15
 
 ### Added

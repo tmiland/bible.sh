@@ -30,6 +30,8 @@ run it. No packages, no companion files, no config.
 - **"Are You Saved?"** — an interactive gospel walkthrough built on the
   Way of the Master method of Ray Comfort (Living Waters)
 - **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
+- **Self-update** — `bible self-update` (or `-u`) pulls the latest version
+  from this repo, syntax-checks it and swaps itself in atomically
 
 ---
 
@@ -187,6 +189,24 @@ Text source: [github.com/aruljohn/Bible-kjv](https://github.com/aruljohn/Bible-k
 even for an installed version; `bible install --all` installs every
 supported offline version. Other versions (NIV, NORSK, …) and VOTD /
 Translate remain online-only.
+
+---
+
+## 👾 Self-update
+
+Since the whole app is one file, updating is one command:
+
+```shell
+bible self-update        # or: bible -u
+```
+
+It fetches the latest `bible.sh` from this repo, compares the `VERSION`
+header, runs a bash syntax check on the download and then swaps the new
+file in atomically. It asks before overwriting; set `SELF_UPDATE_YES=1`
+for unattended upgrades. If the installed copy isn't writable it falls
+back to printing the one-line `curl` install command. The updater block
+is self-contained and sets `SELF_UPDATE_URL` to another repo/file to
+reuse it in any other script.
 
 ---
 

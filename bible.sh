@@ -2851,9 +2851,88 @@ usage() {
                        installs every supported offline version).
   update               bible update [VERSION] [--all]
                        Refresh a locally installed version.
-  status               bible status
-                       Show locally installed versions.
+status               bible status
+                        Show locally installed versions.
+  self-update | -u     bible self-update
+                        Update this script itself from the GitHub repo.
+                        Compares the VERSION header against latest main,
+                        syntax-checks the download, then swaps it in
+                        atomically. SELF_UPDATE_YES=1 skips the prompt.
 EOF
+}
+
+
+# -- Self-update (portable: copy this block into any bash script) -----------------
+# Overridable via env: SELF_UPDATE_URL (raw URL of the file to pull), SELF_UPDATE_YES=1
+_SELF_UPDATE_URL="${SELF_UPDATE_URL:-https://raw.githubusercontent.com/tmiland/bible.sh/main/bible.sh}"
+
+_su_download() { # $1=url  $2=outfile
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 10 "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 10 "$1" -O "$2"
+  else
+    printf 'self-update: need curl or wget\n' >&2
+    return 1
+  fi
+}
+
+_su_version() { # $1=file  -> prints x.y.z from a VERSION='x.y.z' / VERSION="x.y.z" line
+  grep -oE "VERSION=['\"][0-9]+\.[0-9]+[0-9.]*['\"]" "$1" | head -1 | tr -dc '0-9.'
+}
+
+self_update() {
+  local self url tmp rver lver ans
+  self="$(readlink -f "${BASH_SOURCE[0]}")"
+  if [[ ! -f "$self" ]]; then
+    printf "self-update: cannot resolve this script's own path\n" >&2
+    return 1
+  fi
+  if [[ ! -w "$self" ]]; then
+    printf "self-update: '%s' is not writable. Run:\n  curl -fsSL '%s' -o '%s' && chmod +x '%s'\n" "$self" "$_SELF_UPDATE_URL" "$self" "$self" >&2
+    return 1
+  fi
+  url="${SELF_UPDATE_URL:-$_SELF_UPDATE_URL}"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/self-update.XXXXXX")"
+  if ! _su_download "$url" "$tmp"; then
+    printf 'self-update: download failed (%s)\n' "$url" >&2
+    rm -f "$tmp"; return 1
+  fi
+  if command -v bash >/dev/null 2>&1 && ! bash -n "$tmp" 2>/dev/null; then
+    printf 'self-update: downloaded file fails bash syntax check — not applying\n' >&2
+    rm -f "$tmp"; return 1
+  fi
+  rver="$(_su_version "$tmp")"
+  lver="$(_su_version "$self")"
+  if [[ -z "$rver" ]]; then
+    printf 'self-update: no VERSION header in downloaded file\n' >&2
+    rm -f "$tmp"; return 1
+  fi
+  if [[ -z "$lver" ]]; then
+    printf 'self-update: no VERSION header in %s\n' "$self" >&2
+    rm -f "$tmp"; return 1
+  fi
+  if [[ "$(printf '%s\n%s\n' "$lver" "$rver" | sort -V | tail -1)" == "$lver" ]]; then
+    if [[ "$lver" == "$rver" ]]; then
+      printf 'Already up to date (%s).\n' "$lver"
+    else
+      printf 'Local version (%s) is newer than remote (%s).\n' "$lver" "$rver"
+    fi
+    rm -f "$tmp"; return 0
+  fi
+  if [[ "${SELF_UPDATE_YES:-}" != "1" ]]; then
+    printf 'Update %s (%s → %s)? [y/N] ' "${BASH_SOURCE[0]}" "$lver" "$rver"
+    read -r ans
+    if [[ "$ans" != "y" && "$ans" != "Y" && "$ans" != "yes" ]]; then
+      printf 'Aborted.\n'; rm -f "$tmp"; return 0
+    fi
+  fi
+  chmod +x "$tmp"
+  if ! mv -f "$tmp" "$self"; then
+    printf 'self-update: could not replace %s\n' "$self" >&2
+    rm -f "$tmp"; return 1
+  fi
+  printf 'Updated %s → %s (%s).\n' "$lver" "$rver" "$self"
 }
 
 
@@ -3399,6 +3478,7 @@ if [[ $# -gt 0 ]]; then
     install) shift; install_version "${1:-KJV}" "${2:-}" ;;
     update) shift; update_version "${1:-KJV}" "${2:-}" ;;
     status) offline_status ;;
+    self-update | selfupdate | -u | --update | upgrade) shift; self_update ;;
     hl|highlights)
       shift
       case "${1:-status}" in
