@@ -16,17 +16,21 @@ All notable changes to this project are documented in this file.
   self-update (or -u)` in the home header. Disable with
   `bible --no-update-check` or `BIBLE_NO_UPDATE_CHECK=1`.
 - **A proverb a day**: Read → "A proverb a day" opens the chapter of
-  Proverbs matching today's date (31 chapters ↔ 31 days) with a
-  `[r]ead or [l]isten?` prompt; reading records the reading spot,
-  listening plays the chapter audio + transcript. Also `bible proverb`.
+  Proverbs matching today's date (31 chapters ↔ 31 days); reading
+  records the reading spot (Continue picks it up). Also `bible proverb`.
+- **The Lord's prayer**: one pick in Read (shows Matthew 6:9-13) or
+  Listen (plays the verse-range audio).
 - **Reading plans**: Read → "Add a reading plan" (e.g. `Psalm 65`)
-  starts a plan at that chapter and asks `[r]ead or [l]isten?`.
-  Wherever you quit/leave/go back becomes the continuation: the plan
-  listing shows the current chapter, the index's `Continue` resumes it,
-  and reading or listening forward keeps the plan in step (listen plays
-  each chapter's audio, `[n]ext`/`[p]rev`). One plan per book
+  starts a plan at that chapter. Read and Listen are split: **Read**
+  shows plans for reading, **Listen** mirrors the list for audio, and
+  both keep the same position — wherever you quit/leave/go back becomes
+  the continuation, the plan listing shows the current chapter, and the
+  index's `Continue` resumes it either way. One plan per book
   (`~/.cache/bible/plans`, lines `name|osis|chapter|version`); remove
   via Read → "Remove a reading plan".
+- **Arrow-key navigation**: `→`/`←` act as `[n]ext`/`[p]rev` in every
+  chapter loop (Continue spot, Read browse, Listen browse, plan read,
+  plan listen).
 
 ## [1.2.0] - 2026-09-15
 

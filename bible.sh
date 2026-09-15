@@ -3130,7 +3130,7 @@ continue_place() {
     show_chapter "$osis" "$ch" "$ver" "$name"
     save_place "$osis|$name|$ch|$ver"
     plan_sync "$osis" "$ch" "$ver"
-    read -rp "[n]ext [p]rev [f]av [q]uit: " nav </dev/tty
+    nav=$(read_key "[n]ext [p]rev [f]av [q]uit: ")
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
@@ -3154,6 +3154,26 @@ if [[ -z "${NO_FZF:-}" && -n $(command -v 'fzf') ]]; then
 fi
 
 # --- Helpers ---------------------------------------------------------
+# One-keypress navigation: letters as-is (lowercased); Right arrow → n,
+# Left arrow → p. $1 = optional prompt (printed to stderr, like read -p).
+read_key() {
+  local k c d
+  [[ -n "$1" ]] && printf '%s' "$1" >&2
+  IFS= read -rsn1 k </dev/tty
+  if [[ "$k" == $'\x1b' ]]; then
+    if IFS= read -rsn1 -t 0.2 c </dev/tty && [[ "$c" == "[" ]]; then
+      if IFS= read -rsn1 -t 0.2 d </dev/tty; then
+        case "$d" in
+          C) k=n ;;  # Right → next
+          D) k=p ;;  # Left → prev
+          A|B) k="" ;;
+        esac
+      fi
+    fi
+  fi
+  printf '%s' "${k,,}"
+}
+
 pause() {
   read -rp "Press Enter to continue..." _ </dev/tty
 }
@@ -3231,7 +3251,7 @@ browse_books() {
       bible "$name" "$ch:$ref" "$ver"
     fi
     save_place "$osis|$name|$ch|$ver"
-    read -rp "[n]ext [p]rev [v]erse [c]hapter [f]av [q]uit: " nav </dev/tty
+    nav=$(read_key "[n]ext [p]rev [v]erse [c]hapter [f]av [q]uit: ")
     case "$nav" in
       n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
@@ -3242,6 +3262,58 @@ browse_books() {
     esac
   done
 }
+# Audio-browse a Testament: pick book → chapter (optional verse), play
+# the audio, then [n]ext / [p]rev / [c]hapter. Wherever you stop becomes
+# the reading spot too (Continue + plans pick up the same place).
+listen_browse() {
+  # $1 = array name holding OSIS|Name|Chapters entries, $2 = version.
+  local -n _books=$1
+  local ver="$2" entry osis name maxch ch ref nav
+  local -a names
+  names=()
+  for entry in "${_books[@]}"; do
+    names+=("$(cut -d'|' -f2 <<<"$entry")")
+  done
+  entry=$(pick_from_list "Books:" "${names[@]}")
+  [[ -z "$entry" ]] && return
+  for e in "${_books[@]}"; do
+    if [[ "$(cut -d'|' -f2 <<<"$e")" == "$entry" ]]; then
+      entry="$e"
+      break
+    fi
+  done
+  osis="$(cut -d'|' -f1 <<<"$entry")"
+  name="$(cut -d'|' -f2 <<<"$entry")"
+  maxch="$(cut -d'|' -f3 <<<"$entry")"
+  ch=""
+  while true; do
+    if [[ -z "$ch" ]]; then
+      read -rp "$name has $maxch chapters. Chapter (1-$maxch, 0=back): " ch </dev/tty
+      [[ "$ch" == "0" ]] && return
+      if ! [[ "$ch" =~ ^[0-9]+$ ]] || ((ch < 1 || ch > maxch)); then
+        echo "Enter a chapter between 1 and $maxch."
+        ch=""
+        continue
+      fi
+      read -rp "Verse (empty = whole chapter): " ref </dev/tty
+    fi
+    if [[ -z "$ref" ]]; then
+      listen "$name" "$ch" "$ver"
+    else
+      listen "$name" "$ch:$ref" "$ver"
+    fi
+    save_place "$osis|$name|$ch|$ver"
+    nav=$(read_key "[n]ext [p]rev [v]erse [c]hapter [q]uit: ")
+    case "$nav" in
+      n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
+      v|V) read -rp "Verse (empty = whole chapter): " ref </dev/tty ;;
+      c|C) ch="" ;;
+      *) return ;;
+    esac
+  done
+}
+
 show_chapter() {
   # $1=OSIS $2=chapter $3=version $4=display name (optional)
   local osis="$1" ch="$2" ver="$3" dname="${4:-$1}"
@@ -3356,7 +3428,7 @@ plan_read() {
     show_chapter "$osis" "$ch" "$ver" "$name"
     save_place "$osis|$name|$ch|$ver"
     plan_sync "$osis" "$ch" "$ver"
-    read -rp "[n]ext [p]rev [f]av [q]uit: " nav </dev/tty
+    nav=$(read_key "[n]ext [p]rev [f]av [q]uit: ")
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
@@ -3384,23 +3456,7 @@ plan_add() {
   ver="${version:-$DEF_VERSION}"
   plan_save_chapter "$bible_book" "$ch" "$ver"
   printf 'Reading plan: %s %s (%s).\n' "$(osis_name "$bible_book")" "$ch" "$ver"
-  plan_prompt "$(osis_name "$bible_book")|$bible_book|$ch|$ver"
-}
-
-plan_prompt() {
-  # $1 = "name|osis|chapter|version". Ask [r]ead or [l]isten like the
-  # proverb; either way the plan picks up from its stored position.
-  local entry name ch sel
-  entry="$1"
-  IFS='|' read -r name _ ch _ <<< "$entry"
-  read -rsn1 -p "$name $ch — [r]ead or [l]isten? " sel </dev/tty
-  printf '\n'
-  sel="${sel,,}"
-  case "$sel" in
-    r) plan_read "$entry" ;;
-    l) plan_listen "$entry" ;;
-    *) return ;;
-  esac
+  plan_read "$(osis_name "$bible_book")|$bible_book|$ch|$ver"
 }
 
 plan_listen() {
@@ -3416,7 +3472,7 @@ plan_listen() {
     listen "$name" "$ch" "$ver"
     save_place "$osis|$name|$ch|$ver"
     plan_sync "$osis" "$ch" "$ver"
-    read -rp "[n]ext [p]rev [q]uit: " nav </dev/tty
+    nav=$(read_key "[n]ext [p]rev [q]uit: ")
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
@@ -3470,11 +3526,16 @@ menu_read() {
   fi
   choice=$(pick_from_list "Read:" \
     "A proverb a day (Proverbs $day)" \
+    "The Lord's prayer (Matthew 6:9-13)" \
     "${labels[@]}" \
     "Add a reading plan" "Remove a reading plan" \
     "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
   case "$choice" in
     "A proverb a day (Proverbs $day)") menu_proverb ;;
+    "The Lord's prayer (Matthew 6:9-13)")
+      bible "Matthew" "6:9-13" "$DEF_VERSION"
+      pause
+      ;;
     "Add a reading plan") plan_add ;;
     "Remove a reading plan") plan_remove ;;
     "Old Testament") browse_books _OT "$DEF_VERSION" ;;
@@ -3483,7 +3544,7 @@ menu_read() {
     *)
       for i in "${!labels[@]}"; do
         if [[ "${labels[$i]}" == "$choice" ]]; then
-          plan_prompt "${lines[$i]}"
+          plan_read "${lines[$i]}"
           return
         fi
       done
@@ -3492,23 +3553,17 @@ menu_read() {
 }
 
 menu_proverb() {
-  # "A proverb a day": the chapter of Proverbs matching today's date —
-  # Proverbs has exactly 31 chapters, one per day of the month.
-  local day sel osis="PRO"
+  # "A proverb a day": read the chapter of Proverbs matching today's
+  # date — Proverbs has exactly 31 chapters, one per day of the month.
+  # Audio lives in the Listen section ("A proverb a day" there).
+  local day osis="PRO"
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
   if ! [[ "$day" =~ ^[0-9]+$ ]] || ((day < 1 || day > 31)); then
     echo "Could not match today's date to a chapter of Proverbs."
     pause
     return
   fi
-  read -rsn1 -p "Proverbs $day — [r]ead or [l]isten? " sel </dev/tty
-  printf '\n'
-  sel="${sel,,}"
-  case "$sel" in
-    r) show_chapter "$osis" "$day" "$DEF_VERSION" "Proverbs" ;;
-    l) listen "Proverbs" "$day" "$DEF_VERSION"; pause ;;
-    *) return ;;
-  esac
+  show_chapter "$osis" "$day" "$DEF_VERSION" "Proverbs"
   save_place "$osis|Proverbs|$day|$DEF_VERSION"
 }
 
@@ -3561,13 +3616,49 @@ menu_compare() {
 }
 
 menu_listen() {
-  local ref v
-  read -rp "Chapter to listen (e.g. Isaiah 54): " ref </dev/tty
-  [[ -z "$ref" ]] && return
-  read -rp "Version [$DEF_VERSION]: " v </dev/tty
-  # shellcheck disable=SC2086
-  listen $ref ${v:-$DEF_VERSION}
-  pause
+  # The audio mirror of the Read section: proverb, reading plans, and
+  # the whole Bible browsed by book. Wherever you stop becomes the
+  # reading spot too, so Read and Listen pick up the same place.
+  local choice day
+  local -a labels lines
+  local line i name osis ch ver
+  day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
+  labels=(); lines=()
+  if [[ -f "$plan_file" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      IFS='|' read -r name osis ch ver <<< "$line"
+      labels+=("$name $ch")
+      lines+=("$line")
+    done < "$plan_file"
+  fi
+  choice=$(pick_from_list "Listen:" \
+    "A proverb a day (Proverbs $day)" \
+    "The Lord's prayer (Matthew 6:9-13)" \
+    "${labels[@]}" \
+    "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
+  case "$choice" in
+    "A proverb a day (Proverbs $day)")
+      listen "Proverbs" "$day" "$DEF_VERSION"
+      save_place "PRO|Proverbs|$day|$DEF_VERSION"
+      pause
+      ;;
+    "The Lord's prayer (Matthew 6:9-13)")
+      listen "Matthew" "6:9-13" "$DEF_VERSION"
+      pause
+      ;;
+    "Old Testament") listen_browse _OT "$DEF_VERSION" ;;
+    "New Testament") listen_browse _NT "$DEF_VERSION" ;;
+    "Apocrypha (KJVAAE)") listen_browse _APO KJVAAE ;;
+    *)
+      for i in "${!labels[@]}"; do
+        if [[ "${labels[$i]}" == "$choice" ]]; then
+          plan_listen "${lines[$i]}"
+          return
+        fi
+      done
+      ;;
+  esac
 }
 
 pick_target() {

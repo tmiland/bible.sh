@@ -29,11 +29,16 @@ run it. No packages, no companion files, no config.
 - **Highlights** — sync your favorites/notes (OAuth)
 - **"Are You Saved?"** — an interactive gospel walkthrough built on the
   Way of the Master method of Ray Comfort (Living Waters)
-- **A proverb a day** — the chapter of Proverbs matching today's date,
-  with a read-or-listen prompt (Proverbs has 31 chapters, one per day)
-- **Reading plans** — add a plan like *Psalm 65*; it starts there and
-  always continues where you left off (also reached from the index)
+- **A proverb a day** — one chapter of Proverbs per day of the month,
+  read in **Read** or listened to in **Listen**
+- **The Lord's prayer** — one keystroke to Matthew 6:9-13 in Read, or its
+  audio in Listen
+- **Reading plans** — add a plan like *Psalm 65*; it continues where you
+  left off whether you read it (Read) or listen to it (Listen), and the
+  index `Continue` resumes the same spot
 - **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
+- **Arrow-key navigation** — `→`/`←` work like `[n]ext`/`[p]rev` in every
+  chapter loop (Read, Listen, plans, Continue), plus the single-letter keys
 - **Self-update** — `bible self-update` (or `-u`) pulls the latest version
   from this repo, syntax-checks it and swaps itself in atomically; a
   silent version check runs on launch and shows updates in the header
@@ -229,17 +234,16 @@ To skip that check: `bible --no-update-check`, or set
 ## 🗓 A proverb a day
 
 Proverbs has exactly 31 chapters — one for each day of the month — so
-the app picks the chapter matching today's date and asks whether you'd
-like to **read** or **listen**:
+the app picks the chapter matching today's date. **Read** reads it
+(also `bible proverb`); **Listen** plays it:
 
 ```shell
-bible proverb      # or: Read → "A proverb a day"
-# Proverbs 15 — [r]ead or [l]isten?
+Read → "A proverb a day"      # shows Proverbs 15
+Listen → "A proverb a day"    # plays Proverbs 15 audio + transcript
 ```
 
-Reading shows the full chapter and records it as your reading spot
-(Continue picks it up); listening plays the chapter audio and prints
-the transcript.
+Reading records it as your reading spot (Continue picks it up); either
+way you pick up where you left off.
 
 ---
 
@@ -251,16 +255,21 @@ one from **Read → "Add a reading plan"**:
 ```shell
 Read → "Add a reading plan" → Psalm 65
 Reading plan: Psalm 65 (KJV).
-Psalm 65 — [r]ead or [l]isten?
 ```
 
-Either way the plan picks up from its stored position: **read** the
-chapter and move on with `[n]ext`/`[p]rev`; **listen** plays the current
-chapter's audio and offers the same forward/back (then quits). Wherever
-you quit/leave/go back becomes the continuation — the plan appears in
-the Read list (`Psalm 66`) and the index shows `Continue: Psalm 66`,
-which resumes the same spot. Reading forward via Continue keeps the plan
-in step. One plan per book; remove any from
+It opens at that chapter and — from then on — **Read** and **Listen**
+are split cleanly:
+
+- **Read** shows plans for reading; move on with `[n]ext` / `[p]prev`
+  (or the `→` / `←` arrow keys), stop anywhere.
+- **Listen** mirrors the same list for audio; each chapter plays and
+  offers the same forward/back (then quits).
+- Both keep the plan in step: wherever you quit/leave/go back becomes the
+  continuation, the plan listing shows the current chapter, and the index
+  `Continue: Psalm 66` resumes the same spot either way.
+
+The **Lord's prayer** sits in both lists too — Read shows Matthew 6:9-13,
+Listen plays it. One plan per book; remove any from
 **Read → "Remove a reading plan"**.
 
 Plans live in `~/.cache/bible/plans` (one `name|osis|chapter|version`
