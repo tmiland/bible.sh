@@ -1,18 +1,20 @@
-# bible.sh
-Script to get bible verse from bible.com 
+# bible
+Single-file interactive Bible app and CLI.  Every feature —
+frontend, library, offline storage, API, highlights and the
+"Are You Saved?" gospel walkthrough — is internalized in one
+self-contained `bible` executable.  No companion files needed.
 
 # Install
 
 ```shell
-wget -q https://github.com/tmiland/bible.sh/raw/main/bible.sh -O ~/.scripts/bible.sh
 wget -q https://github.com/tmiland/bible.sh/raw/main/bible -O ~/.scripts/bible
 chmod +x ~/.scripts/bible
 ```
-Symlink (the app frontend):
+Symlink (optional):
 ```shell
 ln -sfn ~/.scripts/bible ~/.local/bin/bible
 ```
-(`bible.sh` alone keeps working standalone: `bash bible.sh -b John 3:16 KJV`.)
+(`bible -b John 3:16 KJV` works standalone — no `bible.sh` companion required.)
 
 ## App frontend
 
@@ -23,8 +25,8 @@ Tobit, Judith, Wisdom, Baruch, 1–2 Maccabees, Bel and the
 Dragon), Search, Compare, Listen, Verse of the Day, Translate,
 Version picker and Help, plus an interactive `"Are You Saved?"` gospel
 walkthrough based on the questioning method of Ray Comfort (Living
-Waters, Way of the Master). With arguments it behaves like
-`bible.sh` (`bible -b John 3:16 KJV`).
+Waters, Way of the Master). With arguments it works as a straight
+CLI (`bible -b John 3:16 KJV`).
 
 Reading position, streak days, favorites and the cached verse
 live under `~/.cache/bible/`. List picking uses fzf when
