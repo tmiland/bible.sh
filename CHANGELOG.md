@@ -20,12 +20,13 @@ All notable changes to this project are documented in this file.
   `[r]ead or [l]isten?` prompt; reading records the reading spot,
   listening plays the chapter audio + transcript. Also `bible proverb`.
 - **Reading plans**: Read → "Add a reading plan" (e.g. `Psalm 65`)
-  starts a plan at that chapter. Wherever you quit/leave/go back becomes
-  the continuation: the plan listing shows the current chapter, the
-  index's `Continue` resumes it, and reading forward via Continue keeps
-  the plan in step. One plan per book (`~/.cache/bible/plans`, lines
-  `name|osis|chapter|version`); remove via Read → "Remove a reading
-  plan".
+  starts a plan at that chapter and asks `[r]ead or [l]isten?`.
+  Wherever you quit/leave/go back becomes the continuation: the plan
+  listing shows the current chapter, the index's `Continue` resumes it,
+  and reading or listening forward keeps the plan in step (listen plays
+  each chapter's audio, `[n]ext`/`[p]rev`). One plan per book
+  (`~/.cache/bible/plans`, lines `name|osis|chapter|version`); remove
+  via Read → "Remove a reading plan".
 
 ## [1.2.0] - 2026-09-15
 

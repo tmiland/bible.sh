@@ -3384,7 +3384,45 @@ plan_add() {
   ver="${version:-$DEF_VERSION}"
   plan_save_chapter "$bible_book" "$ch" "$ver"
   printf 'Reading plan: %s %s (%s).\n' "$(osis_name "$bible_book")" "$ch" "$ver"
-  plan_read "$(osis_name "$bible_book")|$bible_book|$ch|$ver"
+  plan_prompt "$(osis_name "$bible_book")|$bible_book|$ch|$ver"
+}
+
+plan_prompt() {
+  # $1 = "name|osis|chapter|version". Ask [r]ead or [l]isten like the
+  # proverb; either way the plan picks up from its stored position.
+  local entry name ch sel
+  entry="$1"
+  IFS='|' read -r name _ ch _ <<< "$entry"
+  read -rsn1 -p "$name $ch — [r]ead or [l]isten? " sel </dev/tty
+  printf '\n'
+  sel="${sel,,}"
+  case "$sel" in
+    r) plan_read "$entry" ;;
+    l) plan_listen "$entry" ;;
+    *) return ;;
+  esac
+}
+
+plan_listen() {
+  # Listen through the plan: plays the current chapter's audio, then
+  # [n]ext / [p]rev / [q]uit. Wherever you stop becomes the plan's
+  # position and the index Continue spot.
+  local line name osis ch ver maxch nav
+  line="$1"
+  IFS='|' read -r name osis ch ver <<< "$line"
+  ver="${ver:-$DEF_VERSION}"
+  maxch=$(book_chapters "$osis")
+  while true; do
+    listen "$name" "$ch" "$ver"
+    save_place "$osis|$name|$ch|$ver"
+    plan_sync "$osis" "$ch" "$ver"
+    read -rp "[n]ext [p]rev [q]uit: " nav </dev/tty
+    case "$nav" in
+      n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      *) return ;;
+    esac
+  done
 }
 
 plan_remove() {
@@ -3445,7 +3483,7 @@ menu_read() {
     *)
       for i in "${!labels[@]}"; do
         if [[ "${labels[$i]}" == "$choice" ]]; then
-          plan_read "${lines[$i]}"
+          plan_prompt "${lines[$i]}"
           return
         fi
       done

@@ -251,13 +251,16 @@ one from **Read → "Add a reading plan"**:
 ```shell
 Read → "Add a reading plan" → Psalm 65
 Reading plan: Psalm 65 (KJV).
+Psalm 65 — [r]ead or [l]isten?
 ```
 
-It opens at that chapter. Read on with `[n]ext` / `[p]rev`; wherever
-you **quit/leave/go back** becomes the continuation — the plan appears
-in the Read list (`Psalm 66`) and the index shows
-`Continue: Psalm 66`, which resumes the same spot. Reading forward via
-Continue keeps the plan in step. One plan per book; remove any from
+Either way the plan picks up from its stored position: **read** the
+chapter and move on with `[n]ext`/`[p]rev`; **listen** plays the current
+chapter's audio and offers the same forward/back (then quits). Wherever
+you quit/leave/go back becomes the continuation — the plan appears in
+the Read list (`Psalm 66`) and the index shows `Continue: Psalm 66`,
+which resumes the same spot. Reading forward via Continue keeps the plan
+in step. One plan per book; remove any from
 **Read → "Remove a reading plan"**.
 
 Plans live in `~/.cache/bible/plans` (one `name|osis|chapter|version`
