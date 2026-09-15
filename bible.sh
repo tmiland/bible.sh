@@ -34,7 +34,7 @@ set -u
 ####                   Maintained by @tmiland                     ####
 ######################################################################
 
-# VERSION='1.1.0' # Must stay on line 14 for updater to fetch the numbers
+# VERSION='1.2.0' # Must stay on line 14 for updater to fetch the numbers
 
 #------------------------------------------------------------------------------#
 #
