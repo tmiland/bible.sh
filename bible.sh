@@ -786,6 +786,51 @@ _yvp_book_name() {
 
 _YVP_HL_BASE="https://api.youversion.com"
 _YVP_HL_TOKEN_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}/youversion-tokens.json"
+# OAuth client credentials can be entered interactively (bible hl login)
+# and saved here; environment variables YVP_CLIENT_ID / YVP_REDIRECT_URI
+# always win over the saved values.
+_YVP_HL_CONFIG="$HOME/.credentials/.bible_yvp_oauth"
+_YVP_HL_REDIRECT_DEFAULT="http://localhost:8080/oauth"
+
+# Load saved OAuth client credentials (env vars win). The file holds two
+# lines: YVP_CLIENT_ID=… and YVP_REDIRECT_URI=…
+_hl_config_load() {
+  [[ -f "$_YVP_HL_CONFIG" ]] || return 0
+  local cid redir
+  cid=$(sed -n 's/^YVP_CLIENT_ID=//p' "$_YVP_HL_CONFIG" | tail -1)
+  redir=$(sed -n 's/^YVP_REDIRECT_URI=//p' "$_YVP_HL_CONFIG" | tail -1)
+  [[ -z "${YVP_CLIENT_ID:-}" && -n "$cid" ]] && YVP_CLIENT_ID="$cid"
+  [[ -z "${YVP_REDIRECT_URI:-}" && -n "$redir" ]] && YVP_REDIRECT_URI="$redir"
+}
+
+_hl_config_save() {
+  mkdir -p "$HOME/.credentials"
+  chmod 700 "$HOME/.credentials"
+  printf 'YVP_CLIENT_ID=%s\nYVP_REDIRECT_URI=%s\n' \
+    "${YVP_CLIENT_ID:-}" "${YVP_REDIRECT_URI:-}" > "$_YVP_HL_CONFIG"
+  chmod 600 "$_YVP_HL_CONFIG"
+}
+
+_hl_configure_prompt() {
+  # Collect the OAuth client credentials interactively. The redirect URI
+  # has to be registered with the app in the YouVersion Platform Portal
+  # and match exactly.
+  local def cid redir
+  echo "YouVersion Platform OAuth client credentials:"
+  echo "  Register an app at https://developers.youversion.com for an"
+  echo "  App Key, Client ID and Redirect URI (the URI must match the"
+  echo "  one registered for the app exactly)."
+  def="${YVP_CLIENT_ID:-}"
+  read -rp "Client ID [${def:-none}]: " cid </dev/tty
+  [[ -n "$cid" ]] && YVP_CLIENT_ID="$cid"
+  if [[ -z "${YVP_CLIENT_ID:-}" ]]; then
+    echo "A Client ID is required." >&2
+    return 1
+  fi
+  def="${YVP_REDIRECT_URI:-$_YVP_HL_REDIRECT_DEFAULT}"
+  read -rp "Redirect URI [$def]: " redir </dev/tty
+  YVP_REDIRECT_URI="${redir:-$def}"
+}
 
 # --- OAuth helpers ----------------------------------------------------
 
@@ -821,7 +866,9 @@ _hl_write_tokens() {
 }
 
 _hl_configured() {
-  # 0 when both YVP_CLIENT_ID and YVP_REDIRECT_URI are set.
+  # 0 when both YVP_CLIENT_ID and YVP_REDIRECT_URI are set (env or the
+  # saved config file).
+  _hl_config_load
   [[ -n "${YVP_CLIENT_ID:-}" && -n "${YVP_REDIRECT_URI:-}" ]]
 }
 
@@ -844,22 +891,20 @@ hl_authorize_url() {
 
 hl_login() {
   # Interactive PKCE login: print authorize URL, wait for user to paste
-  # the authorization code from the redirect, exchange for tokens.
-  if ! _hl_configured; then
-    cat >&2 <<'EOF'
-OAuth not configured. To enable highlights:
-
-1. Register an OAuth client at https://developers.youversion.com
-2. Export your credentials:
-     export YVP_CLIENT_ID="<your client id>"
-     export YVP_REDIRECT_URI="<your redirect uri>"
-3. Then run: bible hl login
-EOF
-    return 1
-  fi
+  # the authorization code from the redirect, exchange for tokens. When
+  # OAuth isn't configured yet, prompt for the Client ID / Redirect URI
+  # first and offer to save them for next time.
   if _hl_read_tokens; then
     echo "Already logged in (tokens cached)."
     return 0
+  fi
+  if ! _hl_configured; then
+    _hl_configure_prompt || return 1
+    local save_ans
+    read -rp "Save credentials to ~/.credentials/.bible_yvp_oauth? [y/N] " save_ans </dev/tty
+    case "$save_ans" in
+      y | Y) _hl_config_save; echo "Saved." ;;
+    esac
   fi
   local auth_url code
   auth_url=$(hl_authorize_url) || return 1
@@ -1016,11 +1061,17 @@ hl_delete() {
 }
 
 hl_status() {
+  _hl_config_load
   echo "OAuth configured: $(if _hl_configured; then echo yes; else echo no; fi)"
+  if _hl_configured; then
+    echo "Client ID:        ${YVP_CLIENT_ID}"
+    echo "Redirect URI:     ${YVP_REDIRECT_URI}"
+  fi
+  [[ -f "$_YVP_HL_CONFIG" ]] && echo "Config file:      $_YVP_HL_CONFIG"
   if _hl_read_tokens 2>/dev/null; then
-    echo "Tokens cached:   yes"
+    echo "Tokens cached:    yes"
   else
-    echo "Tokens cached:   no"
+    echo "Tokens cached:    no"
   fi
 }
 
