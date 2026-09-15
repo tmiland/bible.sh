@@ -1,116 +1,130 @@
-# bible
-Single-file interactive Bible app and CLI.  Every feature —
-frontend, library, offline storage, API, highlights and the
-"Are You Saved?" gospel walkthrough — is internalized in one
-self-contained `bible` executable.  No companion files needed.
+<div align="center">
 
-# Install
+# 📖 bible.sh
 
-```shell
-wget -q https://github.com/tmiland/bible.sh/raw/main/bible -O ~/.scripts/bible
-chmod +x ~/.scripts/bible
-```
-Symlink (optional):
-```shell
-ln -sfn ~/.scripts/bible ~/.local/bin/bible
-```
-(`bible -b John 3:16 KJV` works standalone — no `bible.sh` companion required.)
+**The whole Bible app in one shell file.**
 
-## App frontend
+Everything — interactive app, CLI, offline KJV, YouVersion API,
+highlights and the *"Are You Saved?"* gospel walkthrough — lives inside
+a single self-contained `bible.sh` executable. Download it, chmod it,
+run it. No packages, no companion files, no config.
 
-Run `bible` with no arguments for the interactive app: greeting,
-daily verse, continue-reading, then menus for Read (Old/New
-Testament browse with chapter navigation, plus KJV Apocrypha:
-Tobit, Judith, Wisdom, Baruch, 1–2 Maccabees, Bel and the
-Dragon), Search, Compare, Listen, Verse of the Day, Translate,
-Version picker and Help, plus an interactive `"Are You Saved?"` gospel
-walkthrough based on the questioning method of Ray Comfort (Living
-Waters, Way of the Master). With arguments it works as a straight
-CLI (`bible -b John 3:16 KJV`).
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Shell: bash](https://img.shields.io/badge/shell-bash-4EAA25.svg)](bible.sh)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](#)
+[![Single file](https://img.shields.io/badge/single-file-yes-brightgreen.svg)](#)
 
-Reading position, streak days, favorites and the cached verse
-live under `~/.cache/bible/`. List picking uses fzf when
-installed, otherwise numbered menus (`NO_FZF=1` forces menus).
+</div>
 
-## Offline Bible
+---
 
-bible.sh can read, search and compare the King James Version fully
-offline. `bible install KJV` downloads the public-domain text once,
-then every `-b`, `-s`, `-c` and frontend Read/Listen lookup for KJV
-uses the local database — no internet needed.
+## ✨ Highlights
+
+- **One file, zero deps** — the entire app is a single ~3400-line bash script
+- **Interactive app frontend** — menus for Read, Search, Compare, Listen,
+  Verse of the Day, Translate, Version picker, Offline and Help
+- **Straight CLI** — `bible -b John 3:16 KJV`, pipe it to your clipboard
+- **Offline KJV** — full searchable local database (SQLite FTS5, no internet)
+- **YouVersion Platform** — licensed read/search via `api.youversion.com`
+- **Highlights** — sync your favorites/notes (OAuth)
+- **"Are You Saved?"** — an interactive gospel walkthrough built on the
+  Way of the Master method of Ray Comfort (Living Waters)
+- **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
+
+---
+
+## 🚀 Install
 
 ```shell
-bible install           # install KJV offline text
-bible install KJV       # same
-bible update            # refresh the local text
-bible status            # show installed versions
+wget -q https://github.com/tmiland/bible.sh/raw/main/bible.sh -O ~/.scripts/bible.sh
+chmod +x ~/.scripts/bible.sh
 ```
 
-Data is stored in `~/.cache/bible/`:
-- `KJV.db` — SQLite with an FTS5 full-text index (fastest search)
-- `KJV.json` — automatic JSON fallback when `sqlite3` is not installed
-
-The verse text comes from [github.com/aruljohn/Bible-kjv]
-(https://github.com/aruljohn/Bible-kjv) (KJV, public domain), downloaded
-in parallel on install. Offline features work with either backend;
-`bible install --all` installs every supported offline version.
-Other versions (NIV, NORSK, …) and VOTD/Translate remain online-only.
-
-Set `BIBLE_ONLINE_ONLY=1` to force bible.com lookups even for an
-installed version.
-
-
-**Full write-up on the blog:** https://tmiland.com/bible-sh/
-## Verse of the day
-
-Usage
-```shell
-bible votd
-```
-
-<a href="https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd.png">![votd](https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd.png)</a>
-
-Desktop notification
-
-<a href="https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd_notify.png">![votd_notify](https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd_notify.png)</a>
-
-## Usage
+Symlink it into your `PATH` (optional, so you can keep calling it `bible`):
 
 ```shell
-Arguments            Example usage
---help      | -h     Show this help text.
---bible     | -b     bible -b Isaiah 54:17 KJV
---search    | -s     bible -s "keyword" KJV
---votd      | -v     bible -v
---listen    | -l     bible -l Isaiah 54 KJV
---compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
-                     or bible -c Isaiah 54:17 [en|no]
---translate | -t     bible -t Matthew 17:21 greek en
-                     or bible -t Isaiah 54:17 hebrew en
-install              bible install [VERSION] [--all]
-update               bible update [VERSION] [--all]
-status               bible status
+ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 ```
 
+That's it. `bible -b John 3:16 KJV` works standalone — there are no
+companion files anymore.
+
+---
+
+## ⚡ Quick start
+
+**The app** — run with no arguments for greeting, daily verse,
+continue-reading and the interactive menu:
+
 ```shell
-bible -b Isaiah 54 17 KJV
+bible
 ```
+
+**The CLI** — run with arguments for verse, search, compare, listen,
+translate …:
+
+```shell
+bible -b Isaiah 54:17 KJV
+```
+
 Output:
+
 ```shell
-“No weapon that is formed against thee shall prosper; and every tongue that 
-shall rise against thee in judgment thou shalt condemn. This is the heritage 
-of the servants of the LORD, and their righteousness is of me, saith the 
+“No weapon that is formed against thee shall prosper; and every tongue that
+shall rise against thee in judgment thou shalt condemn. This is the heritage
+of the servants of the LORD, and their righteousness is of me, saith the
 LORD.”
 
 Isaiah 54:17 - (KJV)
 https://www.bible.com/bible/1/ISA.54.17.KJV
 ```
 
-### Flexible reference parsing
+---
 
-The `-b`, `-c`, `-l` and `-t` arguments are parsed flexibly. Chapter and verse
-can be given with or without a colon, with or without a space, and a numbered
-book name can be written with or without a space:
+## 🗂 Usage
+
+| Arguments | Example usage |
+|---|---|
+| `--help` \| `-h` | Show this help text. |
+| `--bible` \| `-b` | `bible -b Isaiah 54:17 KJV` |
+| `--search` \| `-s` | `bible -s "keyword" KJV` |
+| `--votd` \| `-v` | `bible -v` |
+| `--listen` \| `-l` | `bible -l Isaiah 54 KJV` |
+| `--compare` \| `-c` | `bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV` |
+| `--translate` \| `-t` | `bible -t Isaiah 54:17 hebrew en` |
+| `install` | `bible install [VERSION] [--all]` |
+| `update` | `bible update [VERSION] [--all]` |
+| `status` | `bible status` |
+
+### 🔀 Compare versions
+
+```shell
+bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
+```
+
+…or the shortcut for all English/Norwegian versions:
+
+```shell
+bible -c Isaiah 54:17 [en|no]
+```
+
+…or store versions in a variable:
+
+```shell
+export compare_versions=(KJV NIV NLT NKJV ESV N78BM)
+bible -c Isaiah 54 17 $compare_versions
+```
+
+### 🔍 Search
+
+```shell
+bible -s "<keywords>"
+```
+
+### 📖 Flexible reference parsing
+
+`-b`, `-c`, `-l` and `-t` parse references flexibly — colon or space,
+with or without a space after a numbered book, single verses or ranges:
 
 ```shell
 bible -b 2 Timoteus 1 2        # with space, no colon
@@ -122,154 +136,144 @@ bible -b Psalm 23 3            # chapter only
 bible -b 1 Corinthians 13 4-6  # verse range, no colon
 ```
 
-A default version (KJV) is used when no version is given.
+A default version (KJV) is used when none is given.
 
-Reference parsing and its callers were refactored by [opencode](https://opencode.ai).
-
-### Alias to copy to clipboard
+### 📋 Copy to clipboard
 
 ```shell
 clip() {
 	xclip -selection clipboard
 }
-```
-Usage:
-```shell
 bible -b Isaiah 54 17 KJV | clip
 ```
 
-### Compare versions
+---
+
+## 📅 Verse of the day
 
 ```shell
-bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
-```
-or
-```shell
-bible -c Isaiah 54:17 [en|no]
-```
-or
-
-```shell
-# Store versions in a variable for use as argument
-export compare_versions=(KJV NIV NLT NKJV ESV N78BM)
+bible votd
 ```
 
-Usage
+<a href="https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd.png">![votd](https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd.png)</a>
+
+**Desktop notification**
+
+<a href="https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd_notify.png">![votd_notify](https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd_notify.png)</a>
+
+---
+
+## 🌐 Offline Bible
+
+The King James Version is fully readable, searchable and comparable
+**offline**. `bible install KJV` downloads the public-domain text once;
+after that every `-b`, `-s`, `-c` and frontend Read/Listen lookup for
+KJV uses the local database.
+
 ```shell
-bible -c Isaiah 54 17 $compare_versions
+bible install           # install KJV offline text
+bible install KJV       # same
+bible update            # refresh the local text
+bible status            # show installed versions
 ```
 
-Output:
+Data lives in `~/.cache/bible/`:
+
+- `KJV.db` — SQLite with an FTS5 full-text index (fastest search)
+- `KJV.json` — automatic fallback when `sqlite3` isn't installed
+
+Text source: [github.com/aruljohn/Bible-kjv](https://github.com/aruljohn/Bible-kjv)
+(public domain). Set `BIBLE_ONLINE_ONLY=1` to force bible.com lookups
+even for an installed version; `bible install --all` installs every
+supported offline version. Other versions (NIV, NORSK, …) and VOTD /
+Translate remain online-only.
+
+---
+
+## ☁️ YouVersion Platform API
+
+Read and search your *licensed* versions through `api.youversion.com`
+— faster, richer search metadata, and the same verses you already get.
+Active only when an app key is configured and the requested version is
+licensed; otherwise everything falls back to the regular scraping paths.
+
+## ⭐ Highlights
+
+OAuth PKCE login with the YouVersion Data-Exchange flow, then sync your
+favorites/notes via `/v1/highlights`:
+
 ```shell
----------------------
-“No weapon that is formed against thee shall prosper; and every tongue that 
-shall rise against thee in judgment thou shalt condemn. This is the heritage 
-of the servants of the LORD, and their righteousness is of me, saith the 
-LORD.”
-
-Isaiah 54:1 - (KJV)
-https://www.bible.com/bible/1/ISA.54.17.KJV
-------------------------------------------
-no weapon forged against you will prevail, and you will refute every tongue 
-that accuses you. This is the heritage of the servants of the LORD, and this 
-is their vindication from me,” declares the LORD.
-
-Isaiah 54:1 - (NIV)
-https://www.bible.com/bible/111/ISA.54.17.NIV
-------------------------------------------
-“But in that coming day no weapon turned against you will succeed. You will 
-silence every voice raised up to accuse you. These benefits are enjoyed by 
-the servants of the LORD; their vindication will come from me. I, the LORD, 
-have spoken!”
-
-Isaiah 54:1 - (NLT)
-https://www.bible.com/bible/116/ISA.54.17.NLT
-------------------------------------------
-No weapon formed against you shall prosper, And every tongue which rises 
-against you in judgment You shall condemn. This is the heritage of the 
-servants of the LORD, And their righteousness is from Me,” Says the LORD.
-
-Isaiah 54:1 - (NKJV)
-https://www.bible.com/bible/114/ISA.54.17.NKJV
-------------------------------------------
-no weapon that is fashioned against you shall succeed, and you shall refute 
-every tongue that rises against you in judgment. This is the heritage of the 
-servants of the LORD and their vindication from me, declares the LORD.”
-
-Isaiah 54:1 - (ESV)
-https://www.bible.com/bible/59/ISA.54.17.ESV
-------------------------------------------
-“De våpen som blir smidd mot deg, skal mislykkes, alle sammen. Hvert 
-klagemål som blir reist mot deg, skal du kunne gjendrive. Det er den lodd 
-Herrens tjenere får, den rett jeg gir dem, sier Herren.”
-
-Jesaja 54:1 - (N78BM)
-https://www.bible.com/no/bible/30/ISA.54.17.N78BM
----------------------
+bible hl login      # start the OAuth approval flow
+bible hl list       # list your highlights
+bible hl add ...    # add a highlight
 ```
 
-# Translate
+---
 
-Install translate-shell
+## 🙏 "Are You Saved?"
+
+An interactive, self-directed gospel walkthrough built on the
+**Way of the Master** questioning method of Ray Comfort
+([Living Waters](https://livingwaters.com)):
+
 ```shell
-apt install translate-shell 
+bible saved
 ```
-Usage:
+
+Go through the Law and the Good Person Test, judgment, grace, the
+Four Things About God, a sinner's-prayer step and next steps — paged
+to your terminal, one earnest question at a time.
+
+---
+
+## 🗣 Translate
+
+Requires [translate-shell](https://github.com/soimort/translate-shell):
+
 ```shell
+apt install translate-shell
 bible -t Isaiah 54:17 hebrew en
 ```
-or
-```shell
-bible -t Matthew 17:21 greek en [google|bing] [brief|full]
-```
-or (source auto-detected: hebrew for OT, greek for NT)
+
+Or source auto-detected (hebrew for OT, greek for NT):
+
 ```shell
 bible -t John 3:16 auto no
-```
-Engines with working free endpoints are google (default) and
-bing; output is brief and color-free unless `full` is given.
-The original verse prints above its translation for comparison.
-
-
-Output (brief):
-```shell
-Translating Filemon 1:6 (TR1624) -> no [google]
-
-“οπως η κοινωνια της πιστεως σου ενεργης
-γενηται εν επιγνωσει παντος αγαθου του εν
-υμιν εις χριστον ιησουν”
-
-ΠΡΟΣ ΦΙΛΗΜΟΝΑ 1:6 - (TR1624)
-https://www.bible.com/bible/182/PHM.1.6.TR1624
-
-likesom troens fellesskap er virksomt i kunnskapen om alt det gode ved Kristus Jesus
+bible -t Matthew 17:21 greek en [google|bing] [brief|full]
 ```
 
-### Search
+Engines with working free endpoints are google (default) and bing;
+output is brief and color-free unless `full` is given. The original
+verse prints above its translation for comparison.
 
-```shell
-bible -s "<keywords>"
-```
+---
 
-### Credits
-- Contains code from these sources:
-  * [bible_verse-cli](https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse)
-  * Answer on stackoverflow: [Iterate over arguments](https://stackoverflow.com/a/37056727)
-  * [Translate Shell](https://github.com/soimort/translate-shell)
-  * Answer on stackexchange: [What is the fastest way to view images from the terminal?](https://unix.stackexchange.com/a/745334)
-  * [Bash: Show Notifications from Scripts Using notify-send](https://delightlylinux.wordpress.com/2020/10/25/bash-show-notifications-from-scripts-using-notify-send/)
+## 📚 Credits
+
+- [bible_verse-cli](https://github.com/RaynardGerraldo/bible_verse-cli/blob/master/bible_verse)
+- [Iterate over arguments](https://stackoverflow.com/a/37056727) — Stack Overflow
+- [Translate Shell](https://github.com/soimort/translate-shell)
+- [Fastest way to view images from the terminal](https://unix.stackexchange.com/a/745334) — Unix & Linux
+- [Show Notifications from Scripts Using notify-send](https://delightlylinux.wordpress.com/2020/10/25/bash-show-notifications-from-scripts-using-notify-send/)
 - Offline KJV text: [Bible-kjv](https://github.com/aruljohn/Bible-kjv) (public domain)
 - "Are You Saved?" gospel walkthrough: method of Ray Comfort — [Living Waters](https://livingwaters.com) (Way of the Master)
 
-## Donations
+**Full write-up on the blog:** https://tmiland.com/bible-sh/
+
+---
+
+## ❤️ Donations
+
 <a href="https://coindrop.to/tmiland" target="_blank"><img src="https://coindrop.to/embed-button.png" style="border-radius: 10px; height: 57px !important;width: 229px !important;" alt="Coindrop.to me"></img></a>
 
-#### Disclaimer 
+---
 
-*** ***Use at own risk*** ***
+## ⚠️ Disclaimer
 
-### License
+***Use at own risk.***
 
-[![MIT License Image](https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/MIT_logo.svg/220px-MIT_logo.svg.png)](https://github.com/tmiland/bible.sh/blob/master/LICENSE)
+## 📄 License
 
-[MIT License](https://github.com/tmiland/bible.sh/blob/master/LICENSE)
+[![MIT License Image](https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/MIT_logo.svg/220px-MIT_logo.svg.png)](LICENSE)
+
+[MIT License](LICENSE) © Tommy Miland

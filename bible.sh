@@ -9,10 +9,10 @@
 ####   Listen, VOTD, Translate.  Run with args directly:           ####
 ####   bible -b John 3:16 KJV                                      ####
 ######################################################################
-#   wget -q https://github.com/tmiland/bible.sh/raw/main/bible -O ~/.scripts/bible
-#   chmod +x ~/.scripts/bible
-# Symlink:
-#   ln -sfn ~/.scripts/bible ~/.local/bin/bible
+#   wget -q https://github.com/tmiland/bible.sh/raw/main/bible.sh -O ~/.scripts/bible.sh
+#   chmod +x ~/.scripts/bible.sh
+# Symlink (call it just `bible`):
+#   ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 #
 # Single-file build: bible.sh and its module libraries
 # (bible_offline, bible_api, bible_highlights, bible_witness)
@@ -1414,7 +1414,7 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-# Symlink: ln -sfn ~/.scripts/bible ~/.local/bin/bible
+# Symlink: ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 CROSS='✝'
 BQUOTE='“'
 EQUOTE='”'
