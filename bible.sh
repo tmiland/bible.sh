@@ -2858,13 +2858,18 @@ status               bible status
                         Compares the VERSION header against latest main,
                         syntax-checks the download, then swaps it in
                         atomically. SELF_UPDATE_YES=1 skips the prompt.
+  --no-update-check      Launch without checking for updates
+                        (BIBLE_NO_UPDATE_CHECK=1 does the same).
 EOF
 }
 
 
 # -- Self-update (portable: copy this block into any bash script) -----------------
 # Overridable via env: SELF_UPDATE_URL (raw URL of the file to pull), SELF_UPDATE_YES=1
+# Launch-time check: BIBLE_NO_UPDATE_CHECK=1 (or --no-update-check) disables it.
 _SELF_UPDATE_URL="${SELF_UPDATE_URL:-https://raw.githubusercontent.com/tmiland/bible.sh/main/bible.sh}"
+_SU_AVAILABLE=""
+_SU_LOCAL=""
 
 _su_download() { # $1=url  $2=outfile
   if command -v curl >/dev/null 2>&1; then
@@ -2923,7 +2928,7 @@ self_update() {
   if [[ "${SELF_UPDATE_YES:-}" != "1" ]]; then
     printf 'Update %s (%s → %s)? [y/N] ' "${BASH_SOURCE[0]}" "$lver" "$rver"
     read -r ans
-    if [[ "$ans" != "y" && "$ans" != "Y" && "$ans" != "yes" ]]; then
+    if [[ "${ans:-}" != "y" && "${ans:-}" != "Y" && "${ans:-}" != "yes" ]]; then
       printf 'Aborted.\n'; rm -f "$tmp"; return 0
     fi
   fi
@@ -2933,6 +2938,38 @@ self_update() {
     rm -f "$tmp"; return 1
   fi
   printf 'Updated %s → %s (%s).\n' "$lver" "$rver" "$self"
+}
+
+self_update_check() {
+  # Launch-time update check. Non-destructive: only sets _SU_LOCAL and
+  # _SU_AVAILABLE (remote version when it is newer). Skips itself when
+  # BIBLE_NO_UPDATE_CHECK=1. Bounded timeouts so an offline box never
+  # stalls the app for long.
+  local url tmp rver
+  _SU_AVAILABLE=""
+  _SU_LOCAL=""
+  [[ "${BIBLE_NO_UPDATE_CHECK:-0}" == "1" ]] && return 0
+  _SU_LOCAL="$(_su_version "${BASH_SOURCE[0]}")"
+  url="${SELF_UPDATE_URL:-$_SELF_UPDATE_URL}"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/self-check.XXXXXX")"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 3 --max-time 6 "$url" -o "$tmp" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 3 "$url" -O "$tmp" 2>/dev/null
+  fi
+  rver="$(_su_version "$tmp" 2>/dev/null)"
+  rm -f "$tmp"
+  [[ -n "$_SU_LOCAL" && -n "$rver" ]] || return 0
+  [[ "$_SU_LOCAL" != "$rver" ]] || return 0
+  [[ "$(printf '%s\n%s\n' "$_SU_LOCAL" "$rver" | sort -V | tail -1)" == "$rver" ]] \
+    && _SU_AVAILABLE="$rver"
+}
+
+self_update_notice() {
+  # Header banner printed by the home screen when a newer version exists.
+  [[ -n "${_SU_AVAILABLE:-}" ]] || return 0
+  printf "\n${YELLOW}Update available: v%s → v%s${NC}  ${DIM}run: bible self-update (or -u)${NC}\n" \
+    "${_SU_LOCAL:-}" "${_SU_AVAILABLE}"
 }
 
 
@@ -3021,6 +3058,7 @@ home_header() {
     printf "  ${DIM}· %s-day streak${NC}" "$streak"
   fi
   printf "\n\n"
+  self_update_notice
   home_verse
   printf "\n"
 }
@@ -3414,6 +3452,7 @@ menu_saved() {
 
 main_menu() {
   mkdir -p "$BIBLE_CACHE"
+  self_update_check
   home_header
   local key i item found
   local -a keys actions labels
@@ -3479,6 +3518,7 @@ if [[ $# -gt 0 ]]; then
     update) shift; update_version "${1:-KJV}" "${2:-}" ;;
     status) offline_status ;;
     self-update | selfupdate | -u | --update | upgrade) shift; self_update ;;
+    --no-update-check) BIBLE_NO_UPDATE_CHECK=1; main_menu ;;
     hl|highlights)
       shift
       case "${1:-status}" in

@@ -31,7 +31,9 @@ run it. No packages, no companion files, no config.
   Way of the Master method of Ray Comfort (Living Waters)
 - **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
 - **Self-update** — `bible self-update` (or `-u`) pulls the latest version
-  from this repo, syntax-checks it and swaps itself in atomically
+  from this repo, syntax-checks it and swaps itself in atomically; a
+  silent version check runs on launch and shows updates in the header
+  (`--no-update-check` / `BIBLE_NO_UPDATE_CHECK=1` to disable)
 
 ---
 
@@ -207,6 +209,16 @@ for unattended upgrades. If the installed copy isn't writable it falls
 back to printing the one-line `curl` install command. The updater block
 is self-contained and sets `SELF_UPDATE_URL` to another repo/file to
 reuse it in any other script.
+
+**On launch** the app silently compares against the latest version and,
+when a newer one exists, shows it in the header:
+
+```shell
+Update available: v1.2.0 → v1.3.0 — run: bible self-update (or -u)
+```
+
+To skip that check: `bible --no-update-check`, or set
+`BIBLE_NO_UPDATE_CHECK=1` in your environment.
 
 ---
 

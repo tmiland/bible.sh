@@ -11,6 +11,10 @@ All notable changes to this project are documented in this file.
   (`SELF_UPDATE_YES=1` skips); falls back to a one-line curl command
   when the installed copy is not writable. The updater is a portable
   block — override `SELF_UPDATE_URL` to reuse it in other scripts.
+- Launch check: the app silently checks for a newer version on start
+  and, when one exists, shows `Update available: vX → vY — run: bible
+  self-update (or -u)` in the home header. Disable with
+  `bible --no-update-check` or `BIBLE_NO_UPDATE_CHECK=1`.
 
 ## [1.2.0] - 2026-09-15
 
