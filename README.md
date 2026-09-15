@@ -21,7 +21,9 @@ daily verse, continue-reading, then menus for Read (Old/New
 Testament browse with chapter navigation, plus KJV Apocrypha:
 Tobit, Judith, Wisdom, Baruch, 1–2 Maccabees, Bel and the
 Dragon), Search, Compare, Listen, Verse of the Day, Translate,
-Version picker and Help. With arguments it behaves like
+Version picker and Help, plus an interactive `"Are You Saved?"` gospel
+walkthrough based on the questioning method of Ray Comfort (Living
+Waters, Way of the Master). With arguments it behaves like
 `bible.sh` (`bible -b John 3:16 KJV`).
 
 Reading position, streak days, favorites and the cached verse
@@ -255,6 +257,7 @@ bible -s "<keywords>"
   * Answer on stackexchange: [What is the fastest way to view images from the terminal?](https://unix.stackexchange.com/a/745334)
   * [Bash: Show Notifications from Scripts Using notify-send](https://delightlylinux.wordpress.com/2020/10/25/bash-show-notifications-from-scripts-using-notify-send/)
 - Offline KJV text: [Bible-kjv](https://github.com/aruljohn/Bible-kjv) (public domain)
+- "Are You Saved?" gospel walkthrough: method of Ray Comfort — [Living Waters](https://livingwaters.com) (Way of the Master)
 
 ## Donations
 <a href="https://coindrop.to/tmiland" target="_blank"><img src="https://coindrop.to/embed-button.png" style="border-radius: 10px; height: 57px !important;width: 229px !important;" alt="Coindrop.to me"></img></a>

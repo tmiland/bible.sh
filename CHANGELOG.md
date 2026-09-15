@@ -31,6 +31,13 @@ All notable changes to this project are documented in this file.
   `/v1/highlights` CRUD (list/add/delete), gated on an app key plus a
   registered OAuth client (`YVP_CLIENT_ID`, `YVP_REDIRECT_URI`). Without
   those, commands print setup instructions.
+- `"Are You Saved?"` / `bible saved` walkthrough (`bible_witness.sh`):
+  forward-only, interactive gospel mission following the questioning
+  and preaching method of Ray Comfort (Living Waters, Way of the Master).
+  Linear W/D/J/D flow through the Law and the Good Person Test, the
+  Four Things About God, a sinner's-prayer stage, and next-steps.
+  Credited on screen to Ray Comfort / LivingWaters.com.  No quit —
+  the mission ends at the saved conclusion.
 
 ## [1.1.0] - 2026-09-11
 

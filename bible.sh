@@ -66,6 +66,14 @@ if [[ -f "$_OFFLINE_DIR/bible_highlights.sh" ]]; then
   source "$_OFFLINE_DIR/bible_highlights.sh"
 fi
 
+# "Are You Saved?" — the Way of the Master walkthrough: an interactive
+# gospel mission based on the questioning method of Ray Comfort
+# (Living Waters). Authorless for library or CLI use: `bible saved`.
+if [[ -f "$_OFFLINE_DIR/bible_witness.sh" ]]; then
+  # shellcheck source=bible_witness.sh
+  source "$_OFFLINE_DIR/bible_witness.sh"
+fi
+
 # When sourced as a library (e.g. by the `bible` frontend), skip the
 # CLI-only bits: caller's "$@" must not be rewritten or dispatched on.
 _BIBLE_LIB=false
@@ -1524,6 +1532,11 @@ usage() {
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
   --votd      | -v     bible -v
+  --saved     | -a     bible saved
+                       Interactive "Are You Saved?" gospel walkthrough —
+                       the questioning method of Ray Comfort (Living
+                       Waters, Way of the Master). A mission: enter and
+                       do not leave until you are saved.
   --listen    | -l     bible -l Isaiah 54 KJV
   --compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
                        or bible -c Isaiah 54:17 [en|no]
@@ -1580,6 +1593,11 @@ do
     --compare | -c)
       shift
       compare "$@"
+      exit 0
+      ;;
+    --saved | -a | saved)
+      shift
+      witness_saved "$@"
       exit 0
       ;;
     --translate | -t)

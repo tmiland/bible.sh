@@ -507,6 +507,10 @@ menu_votd() {
   pause
 }
 
+menu_saved() {
+  witness_saved "$DEF_VERSION"
+}
+
 main_menu() {
   mkdir -p "$BIBLE_CACHE"
   home_header
@@ -524,9 +528,9 @@ main_menu() {
       actions+=(continue_place)
       labels+=("$item")
     fi
-    keys+=(r f s m l v t e o h)
-    actions+=(menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
-    labels+=("Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
+    keys+=(a r f s m l v t e o h)
+    actions+=(menu_saved menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
+    labels+=("Are you saved?" "Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
     for i in "${!labels[@]}"; do
       printf '%s  ' "$(hotkey_label "${keys[$i]}" "${labels[$i]}")" >&2
     done
@@ -568,6 +572,7 @@ if [[ $# -gt 0 ]]; then
     --votd | -v | votd) shift; votd "$@" ;;
     --listen | -l) shift; listen "$@" ;;
     --compare | -c) shift; compare "$@" ;;
+    --saved | -a | saved) shift; witness_saved "$@" ;;
     --translate | -t) shift; translate "$@" ;;
     install) shift; install_version "${1:-KJV}" "${2:-}" ;;
     update) shift; update_version "${1:-KJV}" "${2:-}" ;;
