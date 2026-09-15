@@ -1534,9 +1534,9 @@ usage() {
   --votd      | -v     bible -v
   --saved     | -a     bible saved
                        Interactive "Are You Saved?" gospel walkthrough —
-                       the questioning method of Ray Comfort (Living
-                       Waters, Way of the Master). A mission: enter and
-                       do not leave until you are saved.
+                       self-directed: follow the questioning method of
+                       Ray Comfort (Living Waters, Way of the Master)
+                       through the Law, judgment and grace to an answer.
   --listen    | -l     bible -l Isaiah 54 KJV
   --compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
                        or bible -c Isaiah 54:17 [en|no]

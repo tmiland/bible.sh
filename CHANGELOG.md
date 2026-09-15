@@ -36,8 +36,7 @@ All notable changes to this project are documented in this file.
   and preaching method of Ray Comfort (Living Waters, Way of the Master).
   Linear W/D/J/D flow through the Law and the Good Person Test, the
   Four Things About God, a sinner's-prayer stage, and next-steps.
-  Credited on screen to Ray Comfort / LivingWaters.com.  No quit —
-  the mission ends at the saved conclusion.
+  Credited on screen to Ray Comfort / LivingWaters.com.
 
 ## [1.1.0] - 2026-09-11
 
