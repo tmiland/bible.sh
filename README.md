@@ -29,6 +29,8 @@ run it. No packages, no companion files, no config.
 - **Highlights** — sync your favorites/notes (OAuth)
 - **"Are You Saved?"** — an interactive gospel walkthrough built on the
   Way of the Master method of Ray Comfort (Living Waters)
+- **A proverb a day** — the chapter of Proverbs matching today's date,
+  with a read-or-listen prompt (Proverbs has 31 chapters, one per day)
 - **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
 - **Self-update** — `bible self-update` (or `-u`) pulls the latest version
   from this repo, syntax-checks it and swaps itself in atomically; a
@@ -219,6 +221,23 @@ Update available: v1.2.0 → v1.3.0 — run: bible self-update (or -u)
 
 To skip that check: `bible --no-update-check`, or set
 `BIBLE_NO_UPDATE_CHECK=1` in your environment.
+
+---
+
+## 🗓 A proverb a day
+
+Proverbs has exactly 31 chapters — one for each day of the month — so
+the app picks the chapter matching today's date and asks whether you'd
+like to **read** or **listen**:
+
+```shell
+bible proverb      # or: Read → "A proverb a day"
+# Proverbs 15 — [r]ead or [l]isten?
+```
+
+Reading shows the full chapter and records it as your reading spot
+(Continue picks it up); listening plays the chapter audio and prints
+the transcript.
 
 ---
 

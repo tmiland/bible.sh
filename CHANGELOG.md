@@ -15,6 +15,10 @@ All notable changes to this project are documented in this file.
   and, when one exists, shows `Update available: vX → vY — run: bible
   self-update (or -u)` in the home header. Disable with
   `bible --no-update-check` or `BIBLE_NO_UPDATE_CHECK=1`.
+- **A proverb a day**: Read → "A proverb a day" opens the chapter of
+  Proverbs matching today's date (31 chapters ↔ 31 days) with a
+  `[r]ead or [l]isten?` prompt; reading records the reading spot,
+  listening plays the chapter audio + transcript. Also `bible proverb`.
 
 ## [1.2.0] - 2026-09-15
 

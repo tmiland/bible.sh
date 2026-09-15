@@ -2827,6 +2827,10 @@ usage() {
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
   --votd      | -v     bible -v
+  proverb              bible proverb
+                       The chapter of Proverbs matching today's date
+                       (menu: Read → "A proverb a day"), with
+                       [r]ead / [l]isten prompt.
   --saved     | -a     bible saved
                        Interactive "Are You Saved?" gospel walkthrough —
                        self-directed: follow the questioning method of
@@ -3291,13 +3295,38 @@ menu_favorites() {
 }
 
 menu_read() {
-  local choice
-  choice=$(pick_from_list "Read:" "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
+  local choice day
+  day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
+  choice=$(pick_from_list "Read:" \
+    "A proverb a day (Proverbs $day)" \
+    "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
   case "$choice" in
+    "A proverb a day (Proverbs $day)") menu_proverb ;;
     "Old Testament") browse_books _OT "$DEF_VERSION" ;;
     "New Testament") browse_books _NT "$DEF_VERSION" ;;
     "Apocrypha (KJVAAE)") browse_books _APO KJVAAE ;;
   esac
+}
+
+menu_proverb() {
+  # "A proverb a day": the chapter of Proverbs matching today's date —
+  # Proverbs has exactly 31 chapters, one per day of the month.
+  local day sel osis="PRO"
+  day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
+  if ! [[ "$day" =~ ^[0-9]+$ ]] || ((day < 1 || day > 31)); then
+    echo "Could not match today's date to a chapter of Proverbs."
+    pause
+    return
+  fi
+  read -rsn1 -p "Proverbs $day — [r]ead or [l]isten? " sel </dev/tty
+  printf '\n'
+  sel="${sel,,}"
+  case "$sel" in
+    r) show_chapter "$osis" "$day" "$DEF_VERSION" "Proverbs" ;;
+    l) listen "Proverbs" "$day" "$DEF_VERSION"; pause ;;
+    *) return ;;
+  esac
+  save_place "$osis|Proverbs|$day|$DEF_VERSION"
 }
 
 menu_offline() {
@@ -3514,6 +3543,7 @@ if [[ $# -gt 0 ]]; then
     --compare | -c) shift; compare "$@" ;;
     --saved | -a | saved) shift; witness_saved "$@" ;;
     --translate | -t) shift; translate "$@" ;;
+    proverb) menu_proverb ;;
     install) shift; install_version "${1:-KJV}" "${2:-}" ;;
     update) shift; update_version "${1:-KJV}" "${2:-}" ;;
     status) offline_status ;;
