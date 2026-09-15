@@ -262,6 +262,8 @@ Reading plan: Psalm 65 (KJV).
 It opens at that chapter and — from then on — **Read** and **Listen**
 are split cleanly:
 
+- Both open with **`Continue reading plan: Psalm 66`** — straight back
+  into your most recent plan, read or listened as appropriate.
 - **Read** shows plans for reading; move on with `[n]ext` / `[p]prev`
   (or the `→` / `←` arrow keys), stop anywhere.
 - **Listen** mirrors the same list for audio; each chapter plays and

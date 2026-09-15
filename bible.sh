@@ -3525,11 +3525,11 @@ plan_remove() {
 }
 
 menu_read() {
-  local choice day
-  local -a labels lines
+  local choice day pl pn po pc pv
+  local -a labels lines picks
   local line i name osis ch ver
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
-  labels=(); lines=()
+  labels=(); lines=(); picks=()
   if [[ -f "$plan_file" ]]; then
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
@@ -3538,13 +3538,24 @@ menu_read() {
       lines+=("$line")
     done < "$plan_file"
   fi
-  choice=$(pick_from_list "Read:" \
-    "A proverb a day (Proverbs $day)" \
+  # The reading plan starts where you last read: a "Continue reading
+  # plan" shortcut for the most recently active plan (last line).
+  pl=""
+  if [[ -s "$plan_file" ]]; then
+    pl="$(tail -1 "$plan_file")"
+    [[ -n "$pl" ]] && IFS='|' read -r pn po pc pv <<< "$pl"
+  fi
+  if [[ -n "$pl" ]]; then
+    picks+=("Continue reading plan: $pn $pc")
+  fi
+  picks+=("A proverb a day (Proverbs $day)" \
     "The Lord's prayer (Matthew 6:9-13)" \
     "${labels[@]}" \
     "Add a reading plan" "Remove a reading plan" \
     "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
+  choice=$(pick_from_list "Read:" "${picks[@]}")
   case "$choice" in
+    "Continue reading plan: $pn $pc") plan_read "$pl" ;;
     "A proverb a day (Proverbs $day)") menu_proverb ;;
     "The Lord's prayer (Matthew 6:9-13)")
       bible "Matthew" "6:9-13" "$DEF_VERSION"
@@ -3633,11 +3644,11 @@ menu_listen() {
   # The audio mirror of the Read section: proverb, reading plans, and
   # the whole Bible browsed by book. Wherever you stop becomes the
   # reading spot too, so Read and Listen pick up the same place.
-  local choice day
-  local -a labels lines
+  local choice day pl pn po pc pv
+  local -a labels lines picks
   local line i name osis ch ver
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
-  labels=(); lines=()
+  labels=(); lines=(); picks=()
   if [[ -f "$plan_file" ]]; then
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
@@ -3646,12 +3657,23 @@ menu_listen() {
       lines+=("$line")
     done < "$plan_file"
   fi
-  choice=$(pick_from_list "Listen:" \
-    "A proverb a day (Proverbs $day)" \
+  # The reading plan starts where you last listened: a "Continue
+  # reading plan" shortcut for the most recently active plan.
+  pl=""
+  if [[ -s "$plan_file" ]]; then
+    pl="$(tail -1 "$plan_file")"
+    [[ -n "$pl" ]] && IFS='|' read -r pn po pc pv <<< "$pl"
+  fi
+  if [[ -n "$pl" ]]; then
+    picks+=("Continue reading plan: $pn $pc")
+  fi
+  picks+=("A proverb a day (Proverbs $day)" \
     "The Lord's prayer (Matthew 6:9-13)" \
     "${labels[@]}" \
     "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
+  choice=$(pick_from_list "Listen:" "${picks[@]}")
   case "$choice" in
+    "Continue reading plan: $pn $pc") plan_listen "$pl" ;;
     "A proverb a day (Proverbs $day)")
       listen "Proverbs" "$day" "$DEF_VERSION"
       save_place "PRO|Proverbs|$day|$DEF_VERSION"
@@ -3788,10 +3810,29 @@ main_menu() {
     keys+=(a r f s m l v t e o h)
     actions+=(menu_saved menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
     labels+=("Are you saved?" "Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
+    # One compact bar: single keypress, no scrolling. Items wrap at the
+    # terminal width (default 80) so long labels never mid-word overflow.
+    local w _lab _plain _used
+    w="${COLUMNS:-}"
+    [[ "$w" =~ ^[0-9]+$ ]] && ((w > 40)) || w="$(tput cols 2>/dev/null || echo 80)"
+    [[ "$w" =~ ^[0-9]+$ ]] && ((w > 40)) || w=80
+    _used=0
     for i in "${!labels[@]}"; do
-      printf '%s  ' "$(hotkey_label "${keys[$i]}" "${labels[$i]}")" >&2
+      _lab="$(hotkey_label "${keys[$i]}" "${labels[$i]}")"
+      _plain="$(printf '%s' "$_lab" | sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g')"
+      if (( _used > 0 && _used + ${#_plain} + 2 > w )); then
+        printf '\n  ' >&2
+        _used=2
+      fi
+      printf '%s  ' "$_lab" >&2
+      _used=$((_used + ${#_plain} + 2))
     done
-    printf '%s\n' "$(hotkey_label q Quit)" >&2
+    _lab="$(hotkey_label q Quit)"
+    _plain="$(printf '%s' "$_lab" | sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g')"
+    if (( _used > 0 && _used + ${#_plain} + 2 > w )); then
+      printf '\n  ' >&2
+    fi
+    printf '%s\n' "$_lab" >&2
     printf '› ' >&2
     IFS= read -rsn1 key </dev/tty
     printf '\n' >&2

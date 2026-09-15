@@ -34,6 +34,11 @@ All notable changes to this project are documented in this file.
 - **Arrow-key navigation**: `→`/`←` act as `[n]ext`/`[p]rev` in every
   chapter loop (Continue spot, Read browse, Listen browse, plan read,
   plan listen).
+- **Continue reading plan**: Read and Listen open with a
+  `Continue reading plan: <name> <ch>` shortcut for the most recently
+  active plan, jumping straight back into reading/listening it.
+- **Index layout**: the home hotkey bar wraps at the terminal width
+  (default 80 columns) so longer labels never mid-word overflow.
 
 ## [1.2.0] - 2026-09-15
 
