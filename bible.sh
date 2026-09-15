@@ -3100,6 +3100,17 @@ book_chapters() {
   done
 }
 
+osis_name() {
+  # $1 = OSIS → display name (e.g. PSA → Psalm), empty if unknown.
+  local e
+  for e in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    if [[ "$(cut -d'|' -f1 <<<"$e")" == "$1" ]]; then
+      cut -d'|' -f2 <<<"$e"
+      return
+    fi
+  done
+}
+
 continue_label() {
   local osis name ch ver
   [[ -f "$BIBLE_LAST" ]] || return
@@ -3118,6 +3129,7 @@ continue_place() {
   while true; do
     show_chapter "$osis" "$ch" "$ver" "$name"
     save_place "$osis|$name|$ch|$ver"
+    plan_sync "$osis" "$ch" "$ver"
     read -rp "[n]ext [p]rev [f]av [q]uit: " nav </dev/tty
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
@@ -3294,17 +3306,150 @@ menu_favorites() {
   done < "$BIBLE_CACHE/favorites"
 }
 
+# --- Reading plans ----------------------------------------------------
+# A plan is a line in $BIBLE_CACHE/plans:  name|osis|chapter|version
+# (one per book; adding again with the same book moves its position).
+# Progress follows wherever you stop: quit/leave/back in the plan loop,
+# and cross-reading from the Continue spot on the index keeps in sync.
+
+plan_file="$BIBLE_CACHE/plans"
+
+plan_sync() {
+  # $1=osis $2=chapter $3=version — fold the given position into the
+  # plan file if a plan exists for that book (no-op otherwise).
+  local osis="$1" ch="$2" ver="$3" p name
+  p="$plan_file"
+  [[ -f "$p" ]] || return 0
+  if grep -q "^[^|]*|$osis|" "$p"; then
+    name=$(osis_name "$osis")
+    grep -v "^[^|]*|$osis|" "$p" > "$p.tmp"
+    printf '%s|%s|%s|%s\n' "$name" "$osis" "$ch" "$ver" >> "$p.tmp"
+    mv "$p.tmp" "$p"
+  fi
+}
+
+plan_save_chapter() {
+  # $1=osis $2=chapter $3=version — create or move a book's plan.
+  local osis="$1" ch="$2" ver="$3" p name
+  p="$plan_file"
+  mkdir -p "$BIBLE_CACHE"
+  name=$(osis_name "$osis")
+  if grep -q "^[^|]*|$osis|" "$p" 2>/dev/null; then
+    grep -v "^[^|]*|$osis|" "$p" > "$p.tmp"
+    printf '%s|%s|%s|%s\n' "$name" "$osis" "$ch" "$ver" >> "$p.tmp"
+    mv "$p.tmp" "$p"
+  else
+    printf '%s|%s|%s|%s\n' "$name" "$osis" "$ch" "$ver" >> "$p"
+  fi
+}
+
+plan_read() {
+  # $1 = "name|osis|chapter|version" (as stored). Read from that chapter;
+  # wherever you quit becomes both the plan's position and the index
+  # Continue spot.
+  local line name osis ch ver maxch nav
+  line="$1"
+  IFS='|' read -r name osis ch ver <<< "$line"
+  ver="${ver:-$DEF_VERSION}"
+  maxch=$(book_chapters "$osis")
+  while true; do
+    show_chapter "$osis" "$ch" "$ver" "$name"
+    save_place "$osis|$name|$ch|$ver"
+    plan_sync "$osis" "$ch" "$ver"
+    read -rp "[n]ext [p]rev [f]av [q]uit: " nav </dev/tty
+    case "$nav" in
+      n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      f|F) toggle_fav "$osis|$name|$ch|$ver" ;;
+      *) return ;;
+    esac
+  done
+}
+
+plan_add() {
+  local ref ch maxch ver
+  read -rp "Reading plan start (e.g. Psalm 65, or 2 Timothy 3): " ref </dev/tty
+  [[ -z "$ref" ]] && return 1
+  # Reuse the app's reference parser: sets book/chapter/verse/version.
+  # shellcheck disable=SC2086
+  args $ref
+  book_case
+  [[ -n "${bible_book:-}" ]] || { echo "Could not resolve book '$book'."; pause; return 1; }
+  ch="${chapter:-1}"
+  maxch=$(book_chapters "$bible_book")
+  if [[ -z "$maxch" ]] || ! [[ "$ch" =~ ^[0-9]+$ ]] || ((ch < 1 || ch > maxch)); then
+    echo "${bible_book_name:-$bible_book} has chapters 1-$maxch."
+    return 1
+  fi
+  ver="${version:-$DEF_VERSION}"
+  plan_save_chapter "$bible_book" "$ch" "$ver"
+  printf 'Reading plan: %s %s (%s).\n' "$(osis_name "$bible_book")" "$ch" "$ver"
+  plan_read "$(osis_name "$bible_book")|$bible_book|$ch|$ver"
+}
+
+plan_remove() {
+  local -a labels lines
+  local line i pick p
+  labels=(); lines=()
+  if [[ -f "$plan_file" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      labels+=("$(cut -d'|' -f1 <<<"$line") $(cut -d'|' -f3 <<<"$line")")
+      lines+=("$line")
+    done < "$plan_file"
+  fi
+  if [[ ${#lines[@]} -eq 0 ]]; then
+    echo "No reading plans yet."
+    pause
+    return
+  fi
+  pick=$(pick_from_list "Remove reading plan:" "${labels[@]}")
+  [[ -z "$pick" ]] && return
+  for i in "${!labels[@]}"; do
+    if [[ "${labels[$i]}" == "$pick" ]]; then
+      p="$plan_file"
+      grep -vxF "${lines[$i]}" "$p" > "$p.tmp" || true
+      mv -f "$p.tmp" "$p"
+      echo "Removed reading plan: $pick"
+      return
+    fi
+  done
+}
+
 menu_read() {
   local choice day
+  local -a labels lines
+  local line i name osis ch ver
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
+  labels=(); lines=()
+  if [[ -f "$plan_file" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      IFS='|' read -r name osis ch ver <<< "$line"
+      labels+=("$name $ch")
+      lines+=("$line")
+    done < "$plan_file"
+  fi
   choice=$(pick_from_list "Read:" \
     "A proverb a day (Proverbs $day)" \
+    "${labels[@]}" \
+    "Add a reading plan" "Remove a reading plan" \
     "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
   case "$choice" in
     "A proverb a day (Proverbs $day)") menu_proverb ;;
+    "Add a reading plan") plan_add ;;
+    "Remove a reading plan") plan_remove ;;
     "Old Testament") browse_books _OT "$DEF_VERSION" ;;
     "New Testament") browse_books _NT "$DEF_VERSION" ;;
     "Apocrypha (KJVAAE)") browse_books _APO KJVAAE ;;
+    *)
+      for i in "${!labels[@]}"; do
+        if [[ "${labels[$i]}" == "$choice" ]]; then
+          plan_read "${lines[$i]}"
+          return
+        fi
+      done
+      ;;
   esac
 }
 

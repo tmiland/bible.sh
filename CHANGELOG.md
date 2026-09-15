@@ -19,6 +19,13 @@ All notable changes to this project are documented in this file.
   Proverbs matching today's date (31 chapters ↔ 31 days) with a
   `[r]ead or [l]isten?` prompt; reading records the reading spot,
   listening plays the chapter audio + transcript. Also `bible proverb`.
+- **Reading plans**: Read → "Add a reading plan" (e.g. `Psalm 65`)
+  starts a plan at that chapter. Wherever you quit/leave/go back becomes
+  the continuation: the plan listing shows the current chapter, the
+  index's `Continue` resumes it, and reading forward via Continue keeps
+  the plan in step. One plan per book (`~/.cache/bible/plans`, lines
+  `name|osis|chapter|version`); remove via Read → "Remove a reading
+  plan".
 
 ## [1.2.0] - 2026-09-15
 

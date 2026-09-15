@@ -31,6 +31,8 @@ run it. No packages, no companion files, no config.
   Way of the Master method of Ray Comfort (Living Waters)
 - **A proverb a day** — the chapter of Proverbs matching today's date,
   with a read-or-listen prompt (Proverbs has 31 chapters, one per day)
+- **Reading plans** — add a plan like *Psalm 65*; it starts there and
+  always continues where you left off (also reached from the index)
 - **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
 - **Self-update** — `bible self-update` (or `-u`) pulls the latest version
   from this repo, syntax-checks it and swaps itself in atomically; a
@@ -238,6 +240,28 @@ bible proverb      # or: Read → "A proverb a day"
 Reading shows the full chapter and records it as your reading spot
 (Continue picks it up); listening plays the chapter audio and prints
 the transcript.
+
+---
+
+## 📘 Reading plans
+
+Make a book your reading plan and the app remembers your spot. Start
+one from **Read → "Add a reading plan"**:
+
+```shell
+Read → "Add a reading plan" → Psalm 65
+Reading plan: Psalm 65 (KJV).
+```
+
+It opens at that chapter. Read on with `[n]ext` / `[p]rev`; wherever
+you **quit/leave/go back** becomes the continuation — the plan appears
+in the Read list (`Psalm 66`) and the index shows
+`Continue: Psalm 66`, which resumes the same spot. Reading forward via
+Continue keeps the plan in step. One plan per book; remove any from
+**Read → "Remove a reading plan"**.
+
+Plans live in `~/.cache/bible/plans` (one `name|osis|chapter|version`
+line per book).
 
 ---
 
