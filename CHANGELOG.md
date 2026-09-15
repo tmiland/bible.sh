@@ -40,11 +40,13 @@ All notable changes to this project are documented in this file.
 - **Index layout**: the home hotkey bar wraps at the terminal width
   (default 80 columns) so longer labels never mid-word overflow.
 - **Highlights login prompt**: `bible hl login` asks for the YouVersion
-  Platform Client ID and Redirect URI when not configured (defaulting
-  the URI to `http://localhost:8080/oauth`, editable), then offers to
-  save them to `~/.credentials/.bible_yvp_oauth` (env vars
+  Platform creds when not configured — the App Key, Client ID and Redirect
+  URI (defaulting the URI to `http://localhost:8080/oauth`, editable,
+  and explaining it only has to match, never load). App Key is saved to
+  `~/.credentials/.bible.com_token`, the OAuth pair to
+  `~/.credentials/.bible_yvp_oauth` (env vars `YVP_APP_KEY`,
   `YVP_CLIENT_ID` / `YVP_REDIRECT_URI` still win). `bible hl status`
-  shows the saved credentials and config path.
+  reports the resolved config and App Key state.
 
 ## [1.2.0] - 2026-09-15
 

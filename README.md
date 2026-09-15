@@ -291,14 +291,18 @@ licensed; otherwise everything falls back to the regular scraping paths.
 ## ⭐ Highlights
 
 OAuth PKCE login with the YouVersion Data-Exchange flow, then sync your
-favorites/notes via `/v1/highlights`. First login is interactive — it
-asks for your Platform Client ID and Redirect URI (the default
-`http://localhost:8080/oauth` is editable), and optionally saves them to
-`~/.credentials/.bible_yvp_oauth` so you only enter them once
-(`YVP_CLIENT_ID` / `YVP_REDIRECT_URI` env vars always take precedence):
+favorites/notes via `/v1/highlights`. Login is interactive: the first
+run walks you through the three pieces from one free Platform app
+registration — the **App Key** (saved to `~/.credentials/.bible.com_token`),
+the **Client ID**, and the **Redirect URI** (default `http://localhost:8080/oauth`,
+editable; it must match the URI registered for the app exactly and never
+has to actually load — you paste the login code from the browser's
+address bar). Everything is saved so later logins go straight to the
+approval step (`YVP_APP_KEY`, `YVP_CLIENT_ID`, `YVP_REDIRECT_URI` env vars
+always win):
 
 ```shell
-bible hl login      # enter client credentials, then approve the login
+bible hl login      # enter credentials once, then approve the login
 bible hl status     # show config + token state
 bible hl list       # list your highlights
 bible hl add ...    # add a highlight

@@ -815,21 +815,46 @@ _hl_configure_prompt() {
   # Collect the OAuth client credentials interactively. The redirect URI
   # has to be registered with the app in the YouVersion Platform Portal
   # and match exactly.
-  local def cid redir
-  echo "YouVersion Platform OAuth client credentials:"
-  echo "  Register an app at https://developers.youversion.com for an"
-  echo "  App Key, Client ID and Redirect URI (the URI must match the"
-  echo "  one registered for the app exactly)."
+  local def
+  echo "Highlights sync needs a free YouVersion Platform app."
+  echo "  Register one at https://developers.youversion.com, then enter"
+  echo "  its App Key, Client ID and Redirect URI (found under App Basic"
+  echo "  Info and OAuth Settings). Enter=skip keeps any already-saved"
+  echo "  values. The Redirect URI only has to match exactly -- it never"
+  echo "  has to load. You'll paste the login code from the browser's"
+  echo "  address bar."
   def="${YVP_CLIENT_ID:-}"
-  read -rp "Client ID [${def:-none}]: " cid </dev/tty
-  [[ -n "$cid" ]] && YVP_CLIENT_ID="$cid"
+  if [[ -n "$def" ]]; then
+    echo "  Client ID (saved): $def"
+  else
+    read -rp "Client ID: " def </dev/tty
+  fi
+  YVP_CLIENT_ID="$def"
   if [[ -z "${YVP_CLIENT_ID:-}" ]]; then
     echo "A Client ID is required." >&2
     return 1
   fi
   def="${YVP_REDIRECT_URI:-$_YVP_HL_REDIRECT_DEFAULT}"
-  read -rp "Redirect URI [$def]: " redir </dev/tty
+  if [[ -n "$def" && -z "${YVP_REDIRECT_URI:-}" ]]; then
+    echo "  Redirect URI (saved): $def"
+  fi
+  read -rp "Redirect URI [Enter = ${_YVP_HL_REDIRECT_DEFAULT}]: " redir </dev/tty
   YVP_REDIRECT_URI="${redir:-$def}"
+  if _yvp_key >/dev/null 2>&1; then
+    echo "  App Key (set)."
+  else
+    local appkey
+    read -rp "App Key [Enter to skip]: " appkey </dev/tty
+    if [[ -n "$appkey" ]]; then
+      mkdir -p "${_YVP_KEY_FILE%/*}"
+      chmod 700 "${_YVP_KEY_FILE%/*}"
+      printf '%s\n' "$appkey" > "$_YVP_KEY_FILE"
+      chmod 600 "$_YVP_KEY_FILE"
+      echo "  App Key saved to ~/.credentials/.bible.com_token."
+    else
+      echo >&2 "  No App Key: syncing will fail until one is set (YVP_APP_KEY or the key file)."
+    fi
+  fi
 }
 
 # --- OAuth helpers ----------------------------------------------------
@@ -1068,6 +1093,11 @@ hl_status() {
     echo "Redirect URI:     ${YVP_REDIRECT_URI}"
   fi
   [[ -f "$_YVP_HL_CONFIG" ]] && echo "Config file:      $_YVP_HL_CONFIG"
+  if _yvp_key >/dev/null 2>&1; then
+    echo "App Key:          set"
+  else
+    echo "App Key:          not set"
+  fi
   if _hl_read_tokens 2>/dev/null; then
     echo "Tokens cached:    yes"
   else
