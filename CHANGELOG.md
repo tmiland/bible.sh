@@ -13,8 +13,11 @@ All notable changes to this project are documented in this file.
   block — override `SELF_UPDATE_URL` to reuse it in other scripts.
 - Launch check: the app silently checks for a newer version on start
   and, when one exists, shows `Update available: vX → vY — run: bible
-  self-update (or -u)` in the home header. Disable with
-  `bible --no-update-check` or `BIBLE_NO_UPDATE_CHECK=1`.
+  self-update (or -u)` in the home header. The remote version is cached
+  in `~/.cache/bible/self-version` and re-fetched at most every
+  `SELF_UPDATE_TTL` seconds (default 21600 / 6 h; `0` = check each
+  launch). Disable with `bible --no-update-check` or
+  `BIBLE_NO_UPDATE_CHECK=1`.
 - **A proverb a day**: Read → "A proverb a day" opens the chapter of
   Proverbs matching today's date (31 chapters ↔ 31 days); reading
   records the reading spot (Continue picks it up). Also `bible proverb`.

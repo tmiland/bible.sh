@@ -2945,24 +2945,38 @@ self_update() {
 }
 
 self_update_check() {
-  # Launch-time update check. Non-destructive: only sets _SU_LOCAL and
-  # _SU_AVAILABLE (remote version when it is newer). Skips itself when
-  # BIBLE_NO_UPDATE_CHECK=1. Bounded timeouts so an offline box never
-  # stalls the app for long.
-  local url tmp rver
+  # Launch-time update check with a TTL cache: the remote version is
+  # re-fetched at most every $SELF_UPDATE_TTL seconds (default 6h), so a
+  # fresh cache avoids downloading the whole script on every launch.
+  # Non-destructive: only sets _SU_LOCAL and _SU_AVAILABLE (remote
+  # version when it is newer). Skips itself when BIBLE_NO_UPDATE_CHECK=1.
+  # Bounded timeouts so an offline box never stalls the app for long.
+  local url tmp rver cache age ttl
   _SU_AVAILABLE=""
   _SU_LOCAL=""
   [[ "${BIBLE_NO_UPDATE_CHECK:-0}" == "1" ]] && return 0
   _SU_LOCAL="$(_su_version "${BASH_SOURCE[0]}")"
   url="${SELF_UPDATE_URL:-$_SELF_UPDATE_URL}"
-  tmp="$(mktemp "${TMPDIR:-/tmp}/self-check.XXXXXX")"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --connect-timeout 3 --max-time 6 "$url" -o "$tmp" 2>/dev/null
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q -T 3 "$url" -O "$tmp" 2>/dev/null
+  ttl="${SELF_UPDATE_TTL:-21600}"
+  cache="$BIBLE_CACHE/self-version"
+  rver=""
+  if [[ -f "$cache" ]]; then
+    read -r rver < "$cache"
+    age=$(( $(date +%s) - $(stat -c %Y "$cache" 2>/dev/null || echo 0) ))
+    (( age >= 0 && age < ttl )) || rver=""
   fi
-  rver="$(_su_version "$tmp" 2>/dev/null)"
-  rm -f "$tmp"
+  if [[ -z "$rver" ]]; then
+    mkdir -p "$BIBLE_CACHE"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/self-check.XXXXXX")"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --connect-timeout 3 --max-time 6 "$url" -o "$tmp" 2>/dev/null
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -T 3 "$url" -O "$tmp" 2>/dev/null
+    fi
+    rver="$(_su_version "$tmp" 2>/dev/null)"
+    rm -f "$tmp"
+    [[ -n "$rver" ]] && printf '%s\n' "$rver" > "$cache"
+  fi
   [[ -n "$_SU_LOCAL" && -n "$rver" ]] || return 0
   [[ "$_SU_LOCAL" != "$rver" ]] || return 0
   [[ "$(printf '%s\n%s\n' "$_SU_LOCAL" "$rver" | sort -V | tail -1)" == "$rver" ]] \

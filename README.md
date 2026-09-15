@@ -226,8 +226,10 @@ when a newer one exists, shows it in the header:
 Update available: v1.2.0 → v1.3.0 — run: bible self-update (or -u)
 ```
 
-To skip that check: `bible --no-update-check`, or set
-`BIBLE_NO_UPDATE_CHECK=1` in your environment.
+The remote version is cached in `~/.cache/bible/self-version` and only
+re-fetched every `SELF_UPDATE_TTL` seconds (default 6 hours — set `0`
+to check at every launch). To skip the check entirely:
+`bible --no-update-check`, or `BIBLE_NO_UPDATE_CHECK=1`.
 
 ---
 
