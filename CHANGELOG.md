@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 ## Unreleased
 
 ### Added
+- Single-file build: `tools/build-single-bible.sh` internalizes
+  `bible.sh` and every module (`bible_offline`, `bible_api`,
+  `bible_highlights`, `bible_witness`) into one self-contained
+  `bible.single` executable. Drop-in for the `bible` frontend with no
+  companion-file dependency; regenerate after editing the sources.
 - Offline Bible support (`bible_offline.sh`): local KJV storage under
   `~/.cache/bible/` as SQLite (`KJV.db`, FTS5 full-text search) with a
   JSON fallback (`KJV.json`, jq/grep search) when `sqlite3` is absent.
