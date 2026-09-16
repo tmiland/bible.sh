@@ -51,6 +51,14 @@ All notable changes to this project are documented in this file.
 - **Highlights account identity**: `bible hl status` decodes the cached
   `id_token` and shows the signed-in YouVersion account (`Account: Name
   <email>`) from the OpenID claims.
+- **Highlights reading experience**: the CLI now matches the *actual*
+  YouVersion highlights API (per-chapter colors). `bible hl list <chapter>`
+  shows each highlighted verse and its color; `bible hl add <verse> [color]`
+  and `bible hl rm <verse>` create/clear highlights (colors are `RRGGBB`).
+  While reading or listening to a chapter, highlighted verses are marked
+  inline with a colored ●. The menu Highlights entry shows the highlighted
+  verses of the chapter you're currently reading (highlights are
+  chapter-scoped on the API — there is no "list everything" call).
 - **Zero-setup highlights login**: bible.sh ships with a shared YouVersion
   App Key (a public OAuth `client_id`, XOR-masked in the source so it never
   sits in plaintext). Most users just run `bible hl login` and approve in

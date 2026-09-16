@@ -462,7 +462,7 @@ local_chapter_text() {
     if [[ -f "$db" ]]; then
       while IFS='|' read -r vnum vtext; do
         if [[ -n "$vtext" ]]; then
-          printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w "${width}" -s)"
+          printf "\n${BOLD}%s${NC}%s %s\n" "$vnum" "$(_hl_verse_mark "$vnum")" "$(echo "$vtext" | fold -w "${width}" -s)"
         fi
       done < <(sqlite3 "$db" "SELECT verse, text FROM verses WHERE osis='$osis' AND chapter=$ch ORDER BY verse;" 2>/dev/null)
       return 0
@@ -473,7 +473,7 @@ local_chapter_text() {
   if [[ -f "$json" ]]; then
     while IFS='|' read -r vnum vtext; do
       if [[ -n "$vtext" ]]; then
-        printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w "${width}" -s)"
+        printf "\n${BOLD}%s${NC}%s %s\n" "$vnum" "$(_hl_verse_mark "$vnum")" "$(echo "$vtext" | fold -w "${width}" -s)"
       fi
     done < <(jq -r --arg o "$osis" --argjson c "$ch" \
       '.verses[] | select(.osis == $o and .chapter == $c) | "\(.verse)|\(.text)"' \
@@ -811,6 +811,9 @@ _yvp_default_key() {
 _YVP_KEY_DEFAULT="$(_yvp_default_key)"
 _YVP_HL_CONFIG="$HOME/.credentials/.bible_yvp_oauth"
 _YVP_HL_REDIRECT_DEFAULT="http://localhost:8080/oauth"
+# Highlight colors for the chapter currently being rendered:
+# "VERSE NR=#RRGGBB VERSE NR=#RRGGBB …" (empty when not logged in / none).
+_HL_CHAPTER_COLORS=""
 
 # Load the saved Redirect URI (env var wins). The file holds one line:
 # YVP_REDIRECT_URI=…
@@ -1204,64 +1207,123 @@ hl_logout() {
   echo "Logged out."
 }
 
-hl_list() {
-  # List highlights for an optional bible/passage filter.
-  _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
-  local bid="${1:-}" url="${_YVP_HL_BASE}/v1/highlights"
-  [[ -n "$bid" ]] && url+="?bible_id=$bid"
+_hl_default_bible_id() {
+  # Echo a bible_id for highlight calls: the version of the last read
+  # spot when available, otherwise KJV (1).
+  local ver
+  ver=$(sed -n 's/^[^|]*|[^|]*|[^|]*|//p' "$BIBLE_LAST" 2>/dev/null | tail -1)
+  if [[ -n "$ver" ]]; then
+    ( version="$ver"; version_case; printf '%s' "${num:-1}" ) 2>/dev/null | tail -1
+  else
+    printf '1'
+  fi
+}
+
+_hl_fetch_passage() {
+  # $1=bible_id $2=passage_id (chapter USFM, e.g. JHN.3). Echoes the
+  # data[] entries ("passage_id color" per line), nothing on failure.
+  _hl_read_tokens || return 1
   local body
   body=$(curl -s -m 20 \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "$url") || return 1
-  local count
-  count=$(printf '%s' "$body" | jq '.highlights | length' 2>/dev/null || echo 0)
-  if [[ "$count" -eq 0 ]]; then
-    echo "No highlights found."
+    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2") || return 1
+  printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null
+}
+
+hl_list() {
+  # List the highlighted verses of a chapter. Usage:
+  #   bible hl list <passage_id> [bible_id]     e.g. bible hl list JHN.3
+  # bible_id defaults to the version of your last read spot (KJV=1).
+  local pg="${1:-}" bid="${2:-}"
+  [[ -n "$pg" ]] || pg=$(sed -n 's/^\([^|]*\)|[^|]*|\([0-9]*\)|.*/\1.\2/p' "$BIBLE_LAST" 2>/dev/null | tail -1)
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
+  if [[ -z "$pg" ]]; then
+    echo "Usage: bible hl list <passage_id> [bible_id]" >&2
+    echo "  e.g.: bible hl list JHN.3   (highlights in John 3)" >&2
+    return 1
+  fi
+  local out
+  out=$(_hl_fetch_passage "$bid" "$pg")
+  if [[ -z "$out" ]]; then
+    echo "No highlights found (or not logged in — run: bible hl login)."
     return 0
   fi
-  printf '%s' "$body" | jq -r '
-    .highlights[] |
-    "\(.reference // "unknown")  [\(.content | split("\n")[0][:60])]"' 2>/dev/null
+  printf '%s\n' "$out" | while IFS=' ' read -r pgid col; do
+    printf '%-12s  #%s\n' "$pgid" "$col"
+  done
 }
 
 hl_add() {
-  # Add a highlight.  Usage: bible hl add <bible_id> <usfm> <content>
+  # Highlight a verse.  Usage: bible hl add <passage_id> [color] [bible_id]
+  #   e.g.: bible hl add JHN.3.16 44aa44   (color is an RRGGBB hex intensity)
   _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
-  local bid="$1" usfm="$2" content="$3"
-  if [[ -z "$bid" || -z "$usfm" || -z "$content" ]]; then
-    echo "Usage: bible hl add <bible_id> <usfm> <content>" >&2
-    return 1
-  fi
-  local chapter verse
-  chapter="${usfm%.*}"; chapter="${chapter#*.}"
-  verse="${usfm##*.}"
+  local pg="${1:-}" col="${2:-5dff79}" bid="${3:-}"
+  [[ -n "$pg" ]] || { echo "Usage: bible hl add <passage_id> [color] [bible_id]" >&2; return 1; }
+  col="${col#\#}"; col="${col,,}"
+  [[ "$col" =~ ^[0-9a-f]{6}$ ]] || { echo "Color must be a 6-digit hex (RRGGBB): $2" >&2; return 1; }
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
+  local rid
+  rid=$(command -v uuidgen >/dev/null && uuidgen || printf '%s-%s' "$(date +%s)" "$RANDOM$RANDOM")
   local body
   body=$(curl -s -m 20 \
     -X POST \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "$(printf '{"content":"%s","version_id":%s,"book_id":0,"chapter":%s,"verse":%s,"reference":"%s"}' \
-      "$content" "$bid" "$chapter" "$verse" "$usfm")" \
+    -d "$(printf '{"request_id":"%s","highlight":{"bible_id":%s,"passage_id":"%s","color":"%s"}}' \
+      "$rid" "$bid" "$pg" "$col")" \
     "${_YVP_HL_BASE}/v1/highlights") || return 1
-  printf '%s' "$body" | jq -r '.id // "error: \(.error_description // .error)"' 2>/dev/null
+  printf '%s' "$body" | jq -r '"Highlighted \(.passage_id // .highlight.passage_id // "?") (\(.color // .highlight.color // ""))"' 2>/dev/null \
+    || printf '%s' "$body"
 }
 
 hl_delete() {
-  # Delete a highlight by id.
+  # Remove highlights for a passage.  Usage: bible hl rm <passage_id> [bible_id]
+  # e.g.: bible hl rm JHN.3.16   (clears that highlighted verse)
   _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
-  local hid="$1"
-  if [[ -z "$hid" ]]; then
-    echo "Usage: bible hl delete <highlight_id>" >&2
-    return 1
-  fi
+  local pg="${1:-}" bid="${2:-}"
+  [[ -n "$pg" ]] || { echo "Usage: bible hl rm <passage_id> [bible_id]" >&2; return 1; }
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
   curl -s -m 20 \
     -X DELETE \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "${_YVP_HL_BASE}/v1/highlights/$hid" >/dev/null
-  echo "Deleted."
+    "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid" >/dev/null
+  echo "Cleared highlight(s) on $pg."
+}
+
+_hl_chapter_colors() {
+  # $1=bible_id $2=passage_id (chapter USFM, e.g. JHN.3). Fills
+  # _HL_CHAPTER_COLORS with "vnum=RRGGBB " pairs for highlighted verses
+  # in that chapter. Silently no-ops when not logged in or on API errors.
+  _HL_CHAPTER_COLORS=""
+  _hl_read_tokens || return 0
+  local body
+  body=$(curl -s -m 10 \
+    -H "x-yvp-app-key: $(_yvp_key)" \
+    -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2") 2>/dev/null || return 0
+  local pgid col
+  while read -r pgid col; do
+    [[ -n "$pgid" && -n "$col" ]] || continue
+    _HL_CHAPTER_COLORS+="${pgid##*.}=$col "
+  done < <(printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null)
+}
+
+_hl_verse_mark() {
+  # $1=verse number. Prints a colored ● for highlighted verses, else ''.
+  # Truecolor swatch, falls back to an uncolored dot on older terminals.
+  local v="$1" tok col
+  [[ -n "$_HL_CHAPTER_COLORS" ]] || return 0
+  for tok in $_HL_CHAPTER_COLORS; do
+    if [[ "${tok%%=*}" == "$v" ]]; then
+      col="${tok#*=}"
+      printf ' \033[38;2;%d;%d;%dm●\033[0m' "0x${col:0:2}" "0x${col:2:2}" "0x${col:4:2}"
+      return 0
+    fi
+  done
+  return 0
 }
 
 hl_status() {
@@ -2322,7 +2384,7 @@ chapter_text() {
     vnum="${usfm##*.}"
     vtext=$(verse_text "$1" "$usfm")
     if [[ -n "$vtext" ]]; then
-      printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w ${width} -s)"
+      printf "\n${BOLD}%s${NC}%s %s\n" "$vnum" "$(_hl_verse_mark "$vnum")" "$(echo "$vtext" | fold -w ${width} -s)"
     fi
   done < <(chapter_usfms "$1" "$2")
 }
@@ -2707,6 +2769,7 @@ listen() {
   # (which has no verse numbers).  When a verse (or range) was given,
   # only the selected verses are shown.
   local local_usfms vstart vend v vtext
+  _hl_chapter_colors "$num" "$bible_book.$chapter"
   local_usfms=$(local_chapter_verses "$bible_book" "$chapter" "$version" 2>/dev/null)
   if [[ -n "$local_usfms" ]]; then
     if [[ -n "$verse" ]]; then
@@ -2714,7 +2777,7 @@ listen() {
       vend="${verse#*-}"
       for (( v=vstart; v<=vend; v++ )); do
         vtext=$(local_verse "$bible_book" "$chapter" "$v" "$version")
-        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC} %s\n" "$v" "$(echo "$vtext" | fold -w ${width} -s)"
+        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
       done
     else
       local_chapter_text "$bible_book" "$chapter" "$version"
@@ -2735,7 +2798,7 @@ listen() {
         vend="${verse#*-}"
         for (( v=vstart; v<=vend; v++ )); do
           vtext=$(verse_text "$listen_text_tmp" "$bible_book.$chapter.$v")
-          [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC} %s\n" "$v" "$(echo "$vtext" | fold -w ${width} -s)"
+          [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
         done
       else
         chapter_text "$listen_text_tmp" "$bible_book.$chapter"
@@ -3135,8 +3198,8 @@ bible.sh — the whole Bible in one shell file.
                        Refresh a locally installed version.
   status               bible status
                        Show locally installed versions.
-  hl | highlights      bible hl list | add ... | delete ... | login
-                       Manage YouVersion highlights (OAuth).
+  hl | highlights      bible hl login | list | add | rm | status
+                        One-time browser sign-in, then highlight verses.
   self-update | -u     bible self-update
                        Update this script from the GitHub repo: compares
                        the VERSION header, syntax-checks the download,
@@ -3614,6 +3677,9 @@ show_chapter() {
   local osis="$1" ch="$2" ver="$3" dname="${4:-$1}"
   version="$ver"
   version_case
+  # Fetch the highlight colors for this chapter so highlighted verses
+  # get marked inline during the read/listen loop.
+  _hl_chapter_colors "$num" "$osis.$ch"
   # Offline-first: render from the local database when installed.
   if [[ "$ver" == "KJV" ]] && _offline_is_installed "KJV"; then
     local usfms
@@ -3674,60 +3740,42 @@ menu_favorites() {
 }
 
 menu_highlights() {
-  # Interactive browser for the user's YouVersion highlights.
+  # Show the highlighted verses of the chapter you're currently reading.
   _hl_read_tokens || {
     echo "You're not signed in to YouVersion yet."
     echo "Run: bible hl login   (one-time browser sign-in)"
     pause
     return
   }
-  local tmp
-  tmp=$(mktemp) || return
-  if ! curl -s -m 20 \
-    -H "x-yvp-app-key: $(_yvp_key)" \
-    -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "$_YVP_HL_BASE/v1/highlights" > "$tmp"; then
-    echo "Couldn't fetch highlights." >&2
-    rm -f "$tmp"
-    return
-  fi
-  local count
-  count=$(jq '.highlights | length' "$tmp" 2>/dev/null || echo 0)
-  if [[ "$count" -eq 0 ]]; then
-    echo "No highlights yet."
-    rm -f "$tmp"
+  if [[ ! -f "$BIBLE_LAST" ]]; then
+    echo "Read or listen to a chapter first — highlights are per-chapter."
     pause
     return
   fi
-  local -a labels hl_ids
-  mapfile -t labels < <(jq -r '
-    .highlights[] |
-    "\(.reference // "unknown")  [\(.content // "" | split("\n")[0][:60])]"' "$tmp")
-  mapfile -t hl_ids < <(jq -r '.highlights[].id' "$tmp")
-  local entry
-  entry=$(pick_from_list "Your highlights:" "${labels[@]}")
-  if [[ -z "$entry" ]]; then
-    rm -f "$tmp"
+  local osis name ch ver bid tok pgid col
+  IFS='|' read -r osis name ch ver < "$BIBLE_LAST"
+  ver="${ver:-$DEF_VERSION}"
+  version="$ver"; version_case; bid="${num:-1}"
+  _hl_chapter_colors "$bid" "$osis.$ch"
+  if [[ -z "$_HL_CHAPTER_COLORS" ]]; then
+    echo "No highlights in $name $ch."
+    pause
     return
   fi
-  # find index → id from the parallel arrays
-  local -i idx=0
-  for ((; idx<${#labels[@]}; idx++)); do
-    [[ "${labels[$idx]}" == "$entry" ]] && break
+  local -a labels
+  labels=()
+  for tok in $_HL_CHAPTER_COLORS; do
+    pgid="${tok%%=*}"; col="${tok#*=}"
+    labels+=("${osis}.${ch}.${pgid}  ●#${col}")
   done
-  local hid="${hl_ids[$idx]}"
-  local sel_ref sel_content
-  sel_ref=$(jq -r --arg id "$hid" '.highlights[] | select((.id|tostring)==$id) | .reference // "unknown"' "$tmp")
-  sel_content=$(jq -r --arg id "$hid" '.highlights[] | select((.id|tostring)==$id) | .content // ""' "$tmp")
-  rm -f "$tmp"
+  local entry
+  entry=$(pick_from_list "Highlights in $name $ch:" "${labels[@]}")
+  [[ -z "$entry" ]] && return
+  local sel="${entry%%  *}"
+  local v="${sel##*.}"
   echo ""
-  echo "${BOLD}$sel_ref${NC}"
-  # show the verse itself
-  bible "${sel_ref//./ }" 2>/dev/null || true
-  if [[ -n "$sel_content" ]]; then
-    printf "${DIM}Note:${NC} %s\n" "$sel_content"
-  fi
-  echo ""
+  printf "\n${BOLD}%s %s:${v}${NC}\n" "$name" "$ch"
+  printf "\n"
   pause
 }
 
@@ -4224,9 +4272,9 @@ if [[ $# -gt 0 ]]; then
         logout) shift; hl_logout ;;
         config) shift; _hl_configure_prompt; _hl_config_save; echo "Saved to ~/.credentials/.bible_yvp_oauth and ~/.credentials/.bible.com_token." ;;
         approve) shift; hl_approve ;;
-        list) shift; hl_list "${1:-}" ;;
+        list) shift; hl_list "$@" ;;
         add) shift; hl_add "$@" ;;
-        delete|rm) shift; hl_delete "${1:-}" ;;
+        delete|rm) shift; hl_delete "$@" ;;
         *) hl_status ;;
       esac
       ;;

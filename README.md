@@ -34,8 +34,8 @@ command away.
 - **🚫 Offline KJV** — a full, searchable local database (SQLite FTS5).
   No internet? Read on. Scriptures don't need a signal.
 - **⭐ Your highlights, in your terminal** — sign in to YouVersion once,
-  and read, add and manage your favorites and notes without leaving the
-  command line (OAuth PKCE, one login).
+  and your highlighted verses appear inline while you read, color-coded
+  per chapter (OAuth PKCE, one login, no registration).
 - **✨ A proverb a day** — Proverbs has exactly 31 chapters for the 31 days
   of the month. Read it or listen to it, every day, right where you left off.
 - **📘 Reading plans** — pick a book like *Psalm 65*, and Read and Listen
@@ -303,22 +303,38 @@ licensed; otherwise everything falls back to the regular scraping paths.
 
 Your Bible reading is yours. `bible.sh` signs in to your YouVersion
 account once (OAuth PKCE, no passwords stored) and brings your
-**favorites and notes right into the terminal** — and it *ships with the
+**highlighted verses right into the terminal** — and it *ships with the
 App Key already configured*, so **you don't have to register anything**.
 Run one command, approve it in your browser, and you're in:
 
 ```shell
-bible hl login      # one-time sign-in — that's it
-bible hl status     # see your config, token and signed-in account
-bible hl list       # browse your highlighted verses
-bible hl add ...    # highlight a verse on the fly
+bible hl login          # one-time sign-in — that's it
+bible hl status         # see your config, token and signed-in account
+bible hl list JHN.3     # highlight colors of John 3 (current chapter by default)
+bible hl add JHN.3.16   # highlight a verse (pick a color: bible hl add JHN.3.16 44aa44)
+bible hl rm  JHN.3.16   # clear the highlight on that verse
 ```
+
+While you read or listen to a chapter, highlighted verses are **marked
+inline with a colored ●** so you can see at a glance which verses you've
+underlined on the bright side. The Highlights entry in the menu shows the
+marked verses of the chapter you're currently reading.
+
+YouVersion's API stores highlights per *verse group* as a color
+(`RRGGBB`), keyed by Bible version — there's no "list everything" call,
+which is why everything here is chapter-scoped.
 
 Everything the code needs is already built in: a shared public OAuth
 client_id (XOR-masked in the source so it never sits in plaintext, and
 safe to share — it's not a secret) plus a default Redirect URI of
 `http://localhost:8080/oauth` that matches the registered callback
 exactly, so the approval flow just works.
+
+Prefer your **own** Platform app? Fully optional: override the App Key
+via `YVP_APP_KEY` or `bible hl config` (saved to
+`~/.credentials/.bible.com_token`) and set your Redirect URI to whatever
+you registered — it must match your app's callback exactly, and it never
+has to load. `YVP_APP_KEY` / `YVP_REDIRECT_URI` env vars always win.
 
 Prefer your **own** Platform app? Fully optional: override the App Key
 via `YVP_APP_KEY` or `bible hl config` (saved to
