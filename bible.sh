@@ -1166,6 +1166,15 @@ hl_approve() {
 
 # --- Highlights CRUD --------------------------------------------------
 
+hl_logout() {
+  # Clear cached OAuth tokens.
+  rm -f "$_YVP_HL_TOKEN_CACHE"
+  _HL_ACCESS_TOKEN=""
+  _HL_REFRESH_TOKEN=""
+  _HL_ID_TOKEN=""
+  echo "Logged out."
+}
+
 hl_list() {
   # List highlights for an optional bible/passage filter.
   _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
@@ -4121,6 +4130,7 @@ if [[ $# -gt 0 ]]; then
       shift
       case "${1:-status}" in
         login) shift; hl_login ;;
+        logout) shift; hl_logout ;;
         config) shift; _hl_configure_prompt; _hl_config_save; echo "Saved to ~/.credentials/.bible_yvp_oauth and ~/.credentials/.bible.com_token." ;;
         approve) shift; hl_approve ;;
         list) shift; hl_list "${1:-}" ;;
