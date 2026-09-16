@@ -3673,6 +3673,64 @@ menu_favorites() {
   done < "$BIBLE_CACHE/favorites"
 }
 
+menu_highlights() {
+  # Interactive browser for the user's YouVersion highlights.
+  _hl_read_tokens || {
+    echo "You're not signed in to YouVersion yet."
+    echo "Run: bible hl login   (one-time browser sign-in)"
+    pause
+    return
+  }
+  local tmp
+  tmp=$(mktemp) || return
+  if ! curl -s -m 20 \
+    -H "x-yvp-app-key: $(_yvp_key)" \
+    -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+    "$_YVP_HL_BASE/v1/highlights" > "$tmp"; then
+    echo "Couldn't fetch highlights." >&2
+    rm -f "$tmp"
+    return
+  fi
+  local count
+  count=$(jq '.highlights | length' "$tmp" 2>/dev/null || echo 0)
+  if [[ "$count" -eq 0 ]]; then
+    echo "No highlights yet."
+    rm -f "$tmp"
+    pause
+    return
+  fi
+  local -a labels hl_ids
+  mapfile -t labels < <(jq -r '
+    .highlights[] |
+    "\(.reference // "unknown")  [\(.content // "" | split("\n")[0][:60])]"' "$tmp")
+  mapfile -t hl_ids < <(jq -r '.highlights[].id' "$tmp")
+  local entry
+  entry=$(pick_from_list "Your highlights:" "${labels[@]}")
+  if [[ -z "$entry" ]]; then
+    rm -f "$tmp"
+    return
+  fi
+  # find index → id from the parallel arrays
+  local -i idx=0
+  for ((; idx<${#labels[@]}; idx++)); do
+    [[ "${labels[$idx]}" == "$entry" ]] && break
+  done
+  local hid="${hl_ids[$idx]}"
+  local sel_ref sel_content
+  sel_ref=$(jq -r --arg id "$hid" '.highlights[] | select((.id|tostring)==$id) | .reference // "unknown"' "$tmp")
+  sel_content=$(jq -r --arg id "$hid" '.highlights[] | select((.id|tostring)==$id) | .content // ""' "$tmp")
+  rm -f "$tmp"
+  echo ""
+  echo "${BOLD}$sel_ref${NC}"
+  # show the verse itself
+  bible "${sel_ref//./ }" 2>/dev/null || true
+  if [[ -n "$sel_content" ]]; then
+    printf "${DIM}Note:${NC} %s\n" "$sel_content"
+  fi
+  echo ""
+  pause
+}
+
 # --- Reading plans ----------------------------------------------------
 # A plan is a line in $BIBLE_CACHE/plans:  name|osis|chapter|version
 # (one per book; adding again with the same book moves its position).
@@ -4088,9 +4146,9 @@ main_menu() {
       actions+=(continue_place)
       labels+=("$item")
     fi
-    keys+=(a r f s m l v t e o h)
-    actions+=(menu_saved menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
-    labels+=("Are you saved?" "Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
+    keys+=(a r f g s m l v t e o h)
+    actions+=(menu_saved menu_read menu_favorites menu_highlights menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
+    labels+=("Are you saved?" "Read" "Favorites" "Highlights" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
     # One compact bar: single keypress, no scrolling. Items wrap at the
     # terminal width (default 80) so long labels never mid-word overflow.
     local w _lab _plain _used
