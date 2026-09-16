@@ -776,75 +776,56 @@ _yvp_book_name() {
 
 ## YouVersion Highlights — OAuth + Data-Exchange support for bible.sh
 ## Full scaffolding of the Platform API's highlights (favorites / notes)
-## feature: OAuth PKCE authorization, data-exchange approval, and
-## /v1/highlights CRUD.  Requires a registered OAuth client
-## (YVP_CLIENT_ID + YVP_REDIRECT_URI) and an app key (YVP_APP_KEY
-## or ~/.credentials/.bible.com_token).
+## feature: OAuth PKCE authorization, and /v1/highlights CRUD.  Requires
+## a registered Platform app: the App Key doubles as the OAuth client_id
+## (YVP_APP_KEY or ~/.credentials/.bible.com_token) plus a Redirect URI
+## (YVP_REDIRECT_URI or ~/.credentials/.bible_yvp_oauth).
 ##
 ## Without OAuth configured, every command prints clear setup instructions.
 ## With tokens cached, CRUD calls go through directly.
 
-_YVP_HL_BASE="https://api.youversion.com"
+_YVP_HL_BASE="${YVP_API_BASE:-https://api.youversion.com}"
 _YVP_HL_TOKEN_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}/youversion-tokens.json"
 # OAuth client credentials can be entered interactively (bible hl login)
-# and saved here; environment variables YVP_CLIENT_ID / YVP_REDIRECT_URI
-# always win over the saved values.
+# and saved here; environment variable YVP_REDIRECT_URI always wins over
+# the saved value. The Platform App Key doubles as the OAuth client_id
+# (YVP_APP_KEY or ~/.credentials/.bible.com_token).
 _YVP_HL_CONFIG="$HOME/.credentials/.bible_yvp_oauth"
 _YVP_HL_REDIRECT_DEFAULT="http://localhost:8080/oauth"
 
-# Load saved OAuth client credentials (env vars win). The file holds two
-# lines: YVP_CLIENT_ID=… and YVP_REDIRECT_URI=…
+# Load the saved Redirect URI (env var wins). The file holds one line:
+# YVP_REDIRECT_URI=…
 _hl_config_load() {
   [[ -f "$_YVP_HL_CONFIG" ]] || return 0
-  local cid redir
-  cid=$(sed -n 's/^YVP_CLIENT_ID=//p' "$_YVP_HL_CONFIG" | tail -1)
+  local redir
   redir=$(sed -n 's/^YVP_REDIRECT_URI=//p' "$_YVP_HL_CONFIG" | tail -1)
-  [[ -z "${YVP_CLIENT_ID:-}" && -n "$cid" ]] && YVP_CLIENT_ID="$cid"
   [[ -z "${YVP_REDIRECT_URI:-}" && -n "$redir" ]] && YVP_REDIRECT_URI="$redir"
 }
 
 _hl_config_save() {
   mkdir -p "$HOME/.credentials"
   chmod 700 "$HOME/.credentials"
-  printf 'YVP_CLIENT_ID=%s\nYVP_REDIRECT_URI=%s\n' \
-    "${YVP_CLIENT_ID:-}" "${YVP_REDIRECT_URI:-}" > "$_YVP_HL_CONFIG"
+  printf 'YVP_REDIRECT_URI=%s\n' "${YVP_REDIRECT_URI:-}" > "$_YVP_HL_CONFIG"
   chmod 600 "$_YVP_HL_CONFIG"
 }
 
 _hl_configure_prompt() {
-  # Collect the OAuth client credentials interactively. The redirect URI
-  # has to be registered with the app in the YouVersion Platform Portal
-  # and match exactly.
+  # Collect the Platform credentials interactively. The App Key is also
+  # the OAuth client_id; the Redirect URI has to be registered with the
+  # app in the YouVersion Platform Portal and match exactly.
   local def
   echo "Highlights sync needs a free YouVersion Platform app."
   echo "  Register one at https://developers.youversion.com, then enter"
-  echo "  its App Key, Client ID and Redirect URI (found under App Basic"
-  echo "  Info and OAuth Settings). Enter=skip keeps any already-saved"
-  echo "  values. The Redirect URI only has to match exactly -- it never"
-  echo "  has to load. You'll paste the login code from the browser's"
-  echo "  address bar."
-  def="${YVP_CLIENT_ID:-}"
-  if [[ -n "$def" ]]; then
-    echo "  Client ID (saved): $def"
-  else
-    read -rp "Client ID: " def </dev/tty
-  fi
-  YVP_CLIENT_ID="$def"
-  if [[ -z "${YVP_CLIENT_ID:-}" ]]; then
-    echo "A Client ID is required." >&2
-    return 1
-  fi
-  def="${YVP_REDIRECT_URI:-$_YVP_HL_REDIRECT_DEFAULT}"
-  if [[ -n "$def" && -z "${YVP_REDIRECT_URI:-}" ]]; then
-    echo "  Redirect URI (saved): $def"
-  fi
-  read -rp "Redirect URI [Enter = ${_YVP_HL_REDIRECT_DEFAULT}]: " redir </dev/tty
-  YVP_REDIRECT_URI="${redir:-$def}"
+  echo "  its App Key and Redirect URI (found under App Basic Info and"
+  echo "  OAuth Settings). Enter=skip keeps any already-saved values."
+  echo "  The Redirect URI only has to match exactly -- it never has to"
+  echo "  load. You'll paste the callback URL from the browser's address"
+  echo "  bar."
   if _yvp_key >/dev/null 2>&1; then
-    echo "  App Key (set)."
+    echo "  App Key (set) — also used as the OAuth client_id."
   else
     local appkey
-    read -rp "App Key [Enter to skip]: " appkey </dev/tty
+    read -rp "App Key: " appkey </dev/tty
     if [[ -n "$appkey" ]]; then
       mkdir -p "${_YVP_KEY_FILE%/*}"
       chmod 700 "${_YVP_KEY_FILE%/*}"
@@ -855,6 +836,12 @@ _hl_configure_prompt() {
       echo >&2 "  No App Key: syncing will fail until one is set (YVP_APP_KEY or the key file)."
     fi
   fi
+  def="${YVP_REDIRECT_URI:-$_YVP_HL_REDIRECT_DEFAULT}"
+  if [[ -n "$def" && -z "${YVP_REDIRECT_URI:-}" ]]; then
+    echo "  Redirect URI (saved): $def"
+  fi
+  read -rp "Redirect URI [Enter = ${_YVP_HL_REDIRECT_DEFAULT}]: " redir </dev/tty
+  YVP_REDIRECT_URI="${redir:-$def}"
 }
 
 # --- OAuth helpers ----------------------------------------------------
@@ -891,34 +878,41 @@ _hl_write_tokens() {
 }
 
 _hl_configured() {
-  # 0 when both YVP_CLIENT_ID and YVP_REDIRECT_URI are set (env or the
-  # saved config file).
+  # 0 when an App Key (env or key file; doubles as client_id) and a
+  # Redirect URI are available.
   _hl_config_load
-  [[ -n "${YVP_CLIENT_ID:-}" && -n "${YVP_REDIRECT_URI:-}" ]]
+  _yvp_key >/dev/null 2>&1 && [[ -n "${YVP_REDIRECT_URI:-}" ]]
 }
 
 # --- Authorization ----------------------------------------------------
 
 hl_authorize_url() {
-  # Build + echo the PKCE authorization URL.
-  local cid="${YVP_CLIENT_ID:-}" redir="${YVP_REDIRECT_URI:-}"
-  if [[ -z "$cid" || -z "$redir" ]]; then
-    echo "Set YVP_CLIENT_ID and YVP_REDIRECT_URI first." >&2
+  # Build + echo the PKCE authorization URL. The App Key is the OAuth
+  # client_id (docs: "note the app_key. This will be the oauth client_id").
+  # Caller must run _hl_pkce_verifier/_hl_pkce_challenge first and set
+  # _HL_STATE + _HL_NONCE (commands run via $( ) can't persist them).
+  local cid redir
+  if ! cid=$(_yvp_key); then
+    echo "No App Key configured. Set YVP_APP_KEY or ~/.credentials/.bible.com_token." >&2
     return 1
   fi
-  _hl_pkce_verifier
-  _hl_pkce_challenge
-  _HL_STATE=$(_hl_rand 16)
+  redir="${YVP_REDIRECT_URI:-}"
+  if [[ -z "$redir" ]]; then
+    echo "No Redirect URI configured. Set YVP_REDIRECT_URI or run: bible hl login" >&2
+    return 1
+  fi
+  local scope="${YVP_HL_SCOPE:-openid%20profile%20email}"
   local url="${_YVP_HL_BASE}/auth/authorize"
-  printf '%s?client_id=%s&response_type=code&redirect_uri=%s&code_challenge=%s&code_challenge_method=S256&state=%s&approval_prompt=force' \
-    "$url" "$cid" "$redir" "$_HL_CODE_CHALLENGE" "$_HL_STATE"
+  printf '%s?client_id=%s&response_type=code&redirect_uri=%s&scope=%s&nonce=%s&code_challenge=%s&code_challenge_method=S256&state=%s&requested_permissions[]=%s' \
+    "$url" "$cid" "$redir" "$scope" "${_HL_NONCE:-}" "${_HL_CODE_CHALLENGE:-}" "$_HL_STATE" "highlights"
 }
 
 hl_login() {
-  # Interactive PKCE login: print authorize URL, wait for user to paste
-  # the authorization code from the redirect, exchange for tokens. When
-  # OAuth isn't configured yet, prompt for the Client ID / Redirect URI
-  # first and offer to save them for next time.
+  # Interactive PKCE login (current two-hop flow): print authorize URL,
+  # wait for the user to paste the callback URL from the browser, replay
+  # state to /auth/callback to obtain the code, then exchange for tokens.
+  # When not configured yet, prompt for the App Key / Redirect URI first
+  # and offer to save them for next time.
   if _hl_read_tokens; then
     echo "Already logged in (tokens cached)."
     return 0
@@ -926,12 +920,18 @@ hl_login() {
   if ! _hl_configured; then
     _hl_configure_prompt || return 1
     local save_ans
-    read -rp "Save credentials to ~/.credentials/.bible_yvp_oauth? [y/N] " save_ans </dev/tty
-    case "$save_ans" in
-      y | Y) _hl_config_save; echo "Saved." ;;
-    esac
+    if _hl_configured; then
+      read -rp "Save credentials to ~/.credentials/.bible_yvp_oauth? [y/N] " save_ans </dev/tty
+      case "$save_ans" in
+        y | Y) _hl_config_save; echo "Saved." ;;
+      esac
+    fi
   fi
-  local auth_url code
+  local auth_url cb code tkn_url
+  _hl_pkce_verifier
+  _hl_pkce_challenge
+  _HL_STATE=$(_hl_rand 16)
+  _HL_NONCE=$(_hl_rand 16)
   auth_url=$(hl_authorize_url) || return 1
   echo "Open the following URL in your browser:"
   echo
@@ -941,18 +941,33 @@ hl_login() {
   if command -v xdg-open >/dev/null; then
     xdg-open "$auth_url" 2>/dev/null &
   fi
-  echo "Paste the authorization code from the redirect URL and press Enter:"
-  read -r code
-  code="${code%%#*}"            # strip trailing state fragment
-  code="${code##*\?}"          # strip query prefix
-  [[ "$code" == *"code="* ]] && code="${code##*code=}"
-  code="${code%%&*}"
-  # Exchange code for tokens
-  local body
+  echo "After approving, copy the full URL from the browser's address bar"
+  echo "(http://localhost:8080/oauth?state=…) and paste it here:"
+  read -r cb
+  cb="${cb%%#*}"                  # strip any fragment
+  local cb_state cb_code
+  cb_state=$(printf '%s' "$cb" | sed -n 's/^.*[?&]state=\([^&]*\).*$/\1/p')
+  cb_code=$(printf '%s' "$cb" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
+  if [[ -z "$cb_code" && -n "$cb_state" ]]; then
+    # First (state-only) callback: replay state to /auth/callback. A CLI
+    # can do this with curl -L; a browser cannot (fetch hides Location).
+    echo "Replaying state to obtain the authorization code…"
+    local eff
+    eff=$(curl -s -L -m 20 -o /dev/null -w '%{url_effective}' \
+      "${_YVP_HL_BASE}/auth/callback?state=$cb_state")
+    cb_code=$(printf '%s' "$eff" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
+  fi
+  if [[ -z "$cb_code" ]]; then
+    echo "No authorization code found in the pasted URL." >&2
+    return 1
+  fi
+  # Exchange code for tokens (App Key as client_id)
+  local body cid
+  cid=$(_yvp_key) || return 1
   body=$(_yvp_api_get "${_YVP_HL_BASE}/auth/token" \
     --data-urlencode "grant_type=authorization_code" \
-    --data-urlencode "code=$code" \
-    --data-urlencode "client_id=${YVP_CLIENT_ID}" \
+    --data-urlencode "code=$cb_code" \
+    --data-urlencode "client_id=$cid" \
     --data-urlencode "redirect_uri=${YVP_REDIRECT_URI}" \
     --data-urlencode "code_verifier=${_HL_CODE_VERIFIER}" \
     2>/dev/null) || { echo "Token exchange failed." >&2; return 1; }
@@ -1087,17 +1102,16 @@ hl_delete() {
 
 hl_status() {
   _hl_config_load
-  echo "OAuth configured: $(if _hl_configured; then echo yes; else echo no; fi)"
-  if _hl_configured; then
-    echo "Client ID:        ${YVP_CLIENT_ID}"
-    echo "Redirect URI:     ${YVP_REDIRECT_URI}"
-  fi
-  [[ -f "$_YVP_HL_CONFIG" ]] && echo "Config file:      $_YVP_HL_CONFIG"
   if _yvp_key >/dev/null 2>&1; then
-    echo "App Key:          set"
+    echo "App Key:          set (also the OAuth client_id)"
   else
     echo "App Key:          not set"
   fi
+  echo "OAuth configured: $(if _hl_configured; then echo yes; else echo no; fi)"
+  if _hl_configured; then
+    echo "Redirect URI:     ${YVP_REDIRECT_URI}"
+  fi
+  [[ -f "$_YVP_HL_CONFIG" ]] && echo "Config file:      $_YVP_HL_CONFIG"
   if _hl_read_tokens 2>/dev/null; then
     echo "Tokens cached:    yes"
   else

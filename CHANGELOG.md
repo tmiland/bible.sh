@@ -39,14 +39,15 @@ All notable changes to this project are documented in this file.
   active plan, jumping straight back into reading/listening it.
 - **Index layout**: the home hotkey bar wraps at the terminal width
   (default 80 columns) so longer labels never mid-word overflow.
-- **Highlights login prompt**: `bible hl login` asks for the YouVersion
-  Platform creds when not configured — the App Key, Client ID and Redirect
-  URI (defaulting the URI to `http://localhost:8080/oauth`, editable,
-  and explaining it only has to match, never load). App Key is saved to
-  `~/.credentials/.bible.com_token`, the OAuth pair to
-  `~/.credentials/.bible_yvp_oauth` (env vars `YVP_APP_KEY`,
-  `YVP_CLIENT_ID` / `YVP_REDIRECT_URI` still win). `bible hl status`
-  reports the resolved config and App Key state.
+- **Highlights login**: aligned with the current YouVersion OAuth spec —
+  the App Key *is* the OAuth `client_id` (no separate Client ID exists), so
+  `bible hl login` only ever needs the App Key + Redirect URI. The flow now
+  uses the documented two-hop callback (paste the callback URL, the state
+  is replayed to `/auth/callback` and the code exchanged at `/auth/token`)
+  with `scope=openid profile email`, `nonce`, and
+  `requested_permissions[]=highlights`. `hl status` reports the App Key /
+  Redirect URI state. `YVP_API_BASE` overrides the API host for testing.
+  Old `YVP_CLIENT_ID` is gone.
 
 ## [1.2.0] - 2026-09-15
 
