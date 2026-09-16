@@ -317,12 +317,18 @@ bible hl rm  JHN.3.16   # clear the highlight on that verse
 
 While you read or listen to a chapter, highlighted verses are **marked
 inline with a colored ●** so you can see at a glance which verses you've
-underlined on the bright side. The Highlights entry in the menu shows the
-marked verses of the chapter you're currently reading.
+underlined on the bright side.
+
+The Highlights entry in the menu (`g`) is a small **highlights browser**:
+it lets you scan a whole book — the one you're reading or any other —
+for every chapter that has highlights, then open any of those chapters
+with the markers inline. Jump straight to the current chapter's
+highlights from the same menu.
 
 YouVersion's API stores highlights per *verse group* as a color
 (`RRGGBB`), keyed by Bible version — there's no "list everything" call,
-which is why everything here is chapter-scoped.
+so the book browser queries each chapter in the book in one parallel
+sweep (a 150-chapter book takes under two seconds).
 
 Everything the code needs is already built in: a shared public OAuth
 client_id (XOR-masked in the source so it never sits in plaintext, and

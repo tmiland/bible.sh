@@ -1425,6 +1425,71 @@ _hl_verse_mark() {
   return 0
 }
 
+_hl_book_scan() {
+  # $1=bible_id $2=osis $3=chapter count $4=access token. Fetches one
+  # highlights request per chapter (parallel when curl supports it).
+  # Returns 0 on success; 1 on failure with _HL_BOOK_ERROR set.
+  local bid="$1" osis="$2" maxch="$3" tok="$4" key ch
+  key=$(_yvp_key) || { _HL_BOOK_ERROR="No App Key configured."; return 1; }
+  local tmpd args
+  tmpd=$(mktemp -d)
+  args=( -s -m 20 -H "x-yvp-app-key: $key" -H "Authorization: Bearer $tok" )
+  if curl --version 2>/dev/null | grep -qi parallel; then
+    local -a urls=()
+    for ch in $(seq 1 "$maxch"); do
+      urls+=(-o "$tmpd/$ch" "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch")
+    done
+    curl "${args[@]}" "${urls[@]}" --parallel --parallel-max 10 >/dev/null 2>&1 || true
+  else
+    for ch in $(seq 1 "$maxch"); do
+      curl "${args[@]}" -o "$tmpd/$ch" "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch" 2>/dev/null || true
+    done
+  fi
+  if [[ ! -f "$tmpd/1" ]] || ! jq -e 'has("data")' "$tmpd/1" >/dev/null 2>&1; then
+    rm -rf "$tmpd"
+    _HL_BOOK_ERROR="Read failed (API or network error). Run: bible hl login"
+    return 1
+  fi
+  local body pgid col cnt
+  for ch in $(seq 1 "$maxch"); do
+    [[ -f "$tmpd/$ch" ]] || continue
+    body=$(cat "$tmpd/$ch")
+    cnt=0
+    while read -r pgid col; do
+      [[ -n "$pgid" && -n "$col" ]] || continue
+      _HL_BOOK_HIGHLIGHTS+="${ch}:${pgid##*.}=$col "
+      cnt=$((cnt + 1))
+    done < <(printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null)
+    if (( cnt > 0 )); then
+      _HL_BOOK_HLCOUNT+="${ch}=${cnt} "
+    fi
+  done
+  rm -rf "$tmpd"
+  return 0
+}
+
+_hl_book_highlights() {
+  # Scans every chapter of a book for highlights. $1=bible_id $2=osis
+  # $3=chapter count. Fills _HL_BOOK_HIGHLIGHTS ("ch:vnum=RRGGBB "
+  # tokens) and _HL_BOOK_HLCOUNT ("ch=count " pairs). Retries once after
+  # a token refresh on a stale token. Returns non-zero on failure with
+  # _HL_BOOK_ERROR set.
+  _HL_BOOK_HIGHLIGHTS=""
+  _HL_BOOK_HLCOUNT=""
+  _HL_BOOK_ERROR=""
+  _hl_read_tokens || { _HL_BOOK_ERROR="Not logged in. Run: bible hl login"; return 1; }
+  local bid="$1" osis="$2" maxch="$3"
+  if _hl_book_scan "$bid" "$osis" "$maxch" "$_HL_ACCESS_TOKEN"; then
+    return 0
+  fi
+  if _hl_token_refresh 2>/dev/null; then
+    _HL_BOOK_ERROR=""
+    _hl_book_scan "$bid" "$osis" "$maxch" "$_HL_ACCESS_TOKEN" && return 0
+  fi
+  [[ -n "$_HL_BOOK_ERROR" ]] || _HL_BOOK_ERROR="Could not read highlights. Run: bible hl login"
+  return 1
+}
+
 hl_status() {
   _hl_config_load
   if _yvp_key >/dev/null 2>&1; then
@@ -3298,7 +3363,8 @@ bible.sh — the whole Bible in one shell file.
   status               bible status
                        Show locally installed versions.
   hl | highlights      bible hl login | list | add | rm | status
-                        One-time browser sign-in, then highlight verses.
+                        One-time browser sign-in, then highlight verses;
+                        the menu (g) scans whole books for highlights.
   self-update | -u     bible self-update
                        Update this script from the GitHub repo: compares
                        the VERSION header, syntax-checks the download,
@@ -3838,44 +3904,128 @@ menu_favorites() {
   done < "$BIBLE_CACHE/favorites"
 }
 
-menu_highlights() {
-  # Show the highlighted verses of the chapter you're currently reading.
-  _hl_read_tokens || {
-    echo "You're not signed in to YouVersion yet."
-    echo "Run: bible hl login   (one-time browser sign-in)"
-    pause
-    return
-  }
-  if [[ ! -f "$BIBLE_LAST" ]]; then
-    echo "Read or listen to a chapter first — highlights are per-chapter."
+_hl_osis_by_name() {
+  # $1 = display name → OSIS code.
+  local e
+  for e in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    if [[ "$(cut -d'|' -f2 <<<"$e")" == "$1" ]]; then
+      cut -d'|' -f1 <<<"$e"
+      return
+    fi
+  done
+}
+
+_hl_pick_book() {
+  # Echo an OSIS code for the book the user picks (empty on abort).
+  local -a books=()
+  local e
+  for e in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    books+=("$(cut -d'|' -f2 <<<"$e")")
+  done
+  local name
+  name=$(pick_from_list "Book:" "${books[@]}")
+  [[ -z "$name" ]] && return 1
+  _hl_osis_by_name "$name"
+}
+
+_hl_browse_book() {
+  # $1=bible_id $2=osis $3=name $4=version — scan every chapter in the
+  # book for highlights, then list the chapters that have some.
+  local bid="$1" osis="$2" name="$3" ver="$4" maxch
+  maxch=$(book_chapters "$osis")
+  [[ -n "$maxch" ]] || { echo "Don't know the chapter count for $name."; pause; return; }
+  echo "Scanning $name ($maxch chapters)…"
+  _hl_book_highlights "$bid" "$osis" "$maxch"
+  if [[ -z "$_HL_BOOK_HIGHLIGHTS" ]]; then
+    if [[ -n "$_HL_BOOK_ERROR" ]]; then
+      echo "$_HL_BOOK_ERROR"
+    else
+      echo "No highlights in $name."
+    fi
     pause
     return
   fi
-  local osis name ch ver bid tok pgid col
-  IFS='|' read -r osis name ch ver < "$BIBLE_LAST"
-  ver="${ver:-$DEF_VERSION}"
-  version="$ver"; version_case; bid="${num:-1}"
+  local -a labels=()
+  local pair chN cnt
+  for pair in $_HL_BOOK_HLCOUNT; do
+    chN="${pair%%=*}"; cnt="${pair#*=}"
+    labels+=("$name $chN   ($cnt)")
+  done
+  local entry
+  entry=$(pick_from_list "Highlighted chapters in $name:" "${labels[@]}")
+  [[ -z "$entry" ]] && return
+  local sel="${entry%%   *}"
+  local c="${sel##* }"
+  _hl_browse_chapter "$bid" "$osis" "$name" "$c" "$ver"
+}
+
+_hl_browse_chapter() {
+  # $1=bible_id $2=osis $3=name $4=chapter $5=version. Lists that
+  # chapter's highlighted verses; picking one opens the chapter with
+  # inline highlight markers.
+  local bid="$1" osis="$2" name="$3" ch="$4" ver="$5"
   _hl_chapter_colors "$bid" "$osis.$ch"
   if [[ -z "$_HL_CHAPTER_COLORS" ]]; then
     echo "No highlights in $name $ch."
     pause
     return
   fi
-  local -a labels
-  labels=()
+  local -a labels=()
+  local tok pgid col
   for tok in $_HL_CHAPTER_COLORS; do
     pgid="${tok%%=*}"; col="${tok#*=}"
-    labels+=("${osis}.${ch}.${pgid}  ●#${col}")
+    labels+=("$osis.$ch.$pgid  ●#${col}")
   done
   local entry
   entry=$(pick_from_list "Highlights in $name $ch:" "${labels[@]}")
   [[ -z "$entry" ]] && return
-  local sel="${entry%%  *}"
-  local v="${sel##*.}"
-  echo ""
-  printf "\n${BOLD}%s %s:${v}${NC}\n" "$name" "$ch"
-  printf "\n"
+  show_chapter "$osis" "$ch" "$ver" "$name"
+  save_place "$osis|$name|$ch|$ver"
   pause
+}
+
+menu_highlights() {
+  # Browse your highlights: pick a book (or the one you're reading) and
+  # scan all its chapters for highlighted verses, or jump straight to the
+  # current chapter's highlights.
+  _hl_read_tokens || {
+    echo "You're not signed in to YouVersion yet."
+    echo "Run: bible hl login   (one-time browser sign-in)"
+    pause
+    return
+  }
+  local osis="" name="" ch="" ver="" bid
+  if [[ -f "$BIBLE_LAST" ]]; then
+    IFS='|' read -r osis name ch ver < "$BIBLE_LAST"
+  fi
+  ver="${ver:-$DEF_VERSION}"
+  version="$ver"; version_case; bid="${num:-1}"
+  if [[ -z "$name" && -n "$osis" ]]; then name=$(osis_name "$osis"); fi
+  local -a picks=()
+  if [[ -n "$osis" ]]; then
+    picks+=("Browse ${name:-$osis} by highlights")
+  fi
+  picks+=("Pick a book…")
+  if [[ -n "$osis" && -n "$ch" ]]; then
+    picks+=("Highlights in ${name:-$osis} $ch")
+  fi
+  local action
+  action=$(pick_from_list "Highlights:" "${picks[@]}")
+  [[ -z "$action" ]] && return
+  case "$action" in
+    "Pick a book…")
+      local bosis bname
+      bosis=$(_hl_pick_book) || return
+      bname=$(osis_name "$bosis")
+      _hl_browse_book "$bid" "$bosis" "$bname" "$ver"
+      ;;
+    "Highlights in "*)
+      _hl_browse_chapter "$bid" "$osis" "$name" "$ch" "$ver"
+      ;;
+    *)
+      _hl_browse_book "$bid" "$osis" "$name" "$ver"
+      ;;
+  esac
 }
 
 # --- Reading plans ----------------------------------------------------
