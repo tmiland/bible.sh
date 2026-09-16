@@ -822,25 +822,29 @@ _hl_configure_prompt() {
   echo "  load. You'll paste the callback URL from the browser's address"
   echo "  bar."
   if _yvp_key >/dev/null 2>&1; then
-    echo "  App Key (set) — also used as the OAuth client_id."
+    echo "  App Key (saved): $(_yvp_key)"
   else
-    local appkey
-    read -rp "App Key: " appkey </dev/tty
-    if [[ -n "$appkey" ]]; then
-      mkdir -p "${_YVP_KEY_FILE%/*}"
-      chmod 700 "${_YVP_KEY_FILE%/*}"
-      printf '%s\n' "$appkey" > "$_YVP_KEY_FILE"
-      chmod 600 "$_YVP_KEY_FILE"
-      echo "  App Key saved to ~/.credentials/.bible.com_token."
-    else
-      echo >&2 "  No App Key: syncing will fail until one is set (YVP_APP_KEY or the key file)."
-    fi
+    echo "  App Key not found."
+  fi
+  local appkey
+  read -rp "  Enter App Key [Enter = keep saved]: " appkey </dev/tty
+  if [[ -n "$appkey" ]]; then
+    mkdir -p "${_YVP_KEY_FILE%/*}"
+    chmod 700 "${_YVP_KEY_FILE%/*}"
+    printf '%s\n' "$appkey" > "$_YVP_KEY_FILE"
+    chmod 600 "$_YVP_KEY_FILE"
+    echo "  Saved."
+  elif ! _yvp_key >/dev/null 2>&1; then
+    echo >&2 "  No App Key entered — syncing will fail until one is set."
   fi
   def="${YVP_REDIRECT_URI:-$_YVP_HL_REDIRECT_DEFAULT}"
   if [[ -n "$def" && -z "${YVP_REDIRECT_URI:-}" ]]; then
     echo "  Redirect URI (saved): $def"
   fi
-  read -rp "Redirect URI [Enter = ${_YVP_HL_REDIRECT_DEFAULT}]: " redir </dev/tty
+  echo "  IMPORTANT: This must EXACTLY match the URI registered in your"
+  echo "  YouVersion app's OAuth Settings — if it doesn't, you'll see"
+  echo "  'redirect_uri does not match registered callback URL'."
+  read -rp "  Redirect URI [Enter = ${_YVP_HL_REDIRECT_DEFAULT}]: " redir </dev/tty
   YVP_REDIRECT_URI="${redir:-$def}"
 }
 
@@ -977,6 +981,15 @@ hl_login() {
       local cb_ed
       cb_ed=$(printf '%s' "$cb" | sed -n 's/^.*[?&]error_description=\([^&]*\).*$/\1/p' | sed 's/+/ /g')
       echo >&2 "  Authorization failed on YouVersion's side: $cb_err${cb_ed:+ ($cb_ed)}"
+      if [[ "$cb_err" == "invalid_request" && "$cb_ed" == *"redirect_uri"* ]]; then
+        echo >&2 "  This means the Redirect URI in your config"
+        echo >&2 "  ($YVP_REDIRECT_URI)"
+        echo >&2 "  does not match the callback URL registered in the YouVersion"
+        echo >&2 "  dev portal (https://developers.youversion.com/apps -> OAuth"
+        echo >&2 "  Settings). Copy the exact URI from there and re-run:"
+        echo >&2 "    YVP_REDIRECT_URI='https://...' bible hl login"
+        echo >&2 "  or edit ~/.credentials/.bible_yvp_oauth."
+      fi
       return 1
     fi
     if [[ -z "$cb_code" && -n "$cb_state" ]]; then
