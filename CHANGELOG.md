@@ -48,6 +48,9 @@ All notable changes to this project are documented in this file.
   `requested_permissions[]=highlights`. `hl status` reports the App Key /
   Redirect URI state. `YVP_API_BASE` overrides the API host for testing.
   Old `YVP_CLIENT_ID` is gone.
+- **Highlights account identity**: `bible hl status` decodes the cached
+  `id_token` and shows the signed-in YouVersion account (`Account: Name
+  <email>`) from the OpenID claims.
 
 ## [1.2.0] - 2026-09-15
 

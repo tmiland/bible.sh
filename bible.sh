@@ -877,6 +877,20 @@ _hl_write_tokens() {
   chmod 600 "$_YVP_HL_TOKEN_CACHE"
 }
 
+_hl_id_claims() {
+  # Decode the id_token payload (base64url JWT). Echoes a JSON object with
+  # name/email; empty output when the token is missing or unreadable.
+  local tok="${_HL_ID_TOKEN:-}" payload
+  [[ -n "$tok" ]] || return 1
+  payload=$(printf '%s' "$tok" | cut -d. -f2)
+  payload=$(printf '%s' "$payload" | tr '_-' '/+')
+  case $((${#payload} % 4)) in
+    2) payload+="==" ;;
+    3) payload+="=" ;;
+  esac
+  printf '%s' "$payload" | base64 -d 2>/dev/null | jq -c 'select((.name? != null) or (.email? != null)) | {name, email}' 2>/dev/null
+}
+
 _hl_configured() {
   # 0 when an App Key (env or key file; doubles as client_id) and a
   # Redirect URI are available.
@@ -1114,6 +1128,19 @@ hl_status() {
   [[ -f "$_YVP_HL_CONFIG" ]] && echo "Config file:      $_YVP_HL_CONFIG"
   if _hl_read_tokens 2>/dev/null; then
     echo "Tokens cached:    yes"
+    local claims nm em
+    claims=$(_hl_id_claims)
+    if [[ -n "$claims" ]]; then
+      nm=$(printf '%s' "$claims" | jq -r '.name // empty')
+      em=$(printf '%s' "$claims" | jq -r '.email // empty')
+      if [[ -n "$nm" && -n "$em" ]]; then
+        echo "Account:          $nm <$em>"
+      elif [[ -n "$nm" ]]; then
+        echo "Account:          $nm"
+      elif [[ -n "$em" ]]; then
+        echo "Account:          $em"
+      fi
+    fi
   else
     echo "Tokens cached:    no"
   fi

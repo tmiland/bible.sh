@@ -307,7 +307,7 @@ step (`YVP_APP_KEY` / `YVP_REDIRECT_URI` env vars always win):
 
 ```shell
 bible hl login      # enter credentials once, then approve the login
-bible hl status     # show config + token state
+bible hl status     # show config, token + signed-in account state
 bible hl list       # list your highlights
 bible hl add ...    # add a highlight
 ```
