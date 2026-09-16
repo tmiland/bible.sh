@@ -925,10 +925,65 @@ hl_authorize_url() {
     "$url" "$cid" "$redir" "$scope" "${_HL_NONCE:-}" "${_HL_CODE_CHALLENGE:-}" "$_HL_STATE" "highlights"
 }
 
+_hl_redirect_port() {
+  # Echo the port of a localhost redirect_uri ("" if not localhost/local). 
+  local ru="${YVP_REDIRECT_URI:-}"
+  printf '%s' "$ru" | sed -n 's#^http://\(localhost\|127\.0\.0\.1\|\[::1\]\):\([0-9]*\).*#\2#p'
+}
+
+_hl_listen_wait() {
+  # Run a throwaway HTTP server on the redirect_uri's port; block (with
+  # timeout) until a callback URL lands on it. Echoes the callback path.
+  # For localhost redirect URIs only. No-op fallback if it can't run.
+  local port log py pid tries=0 line
+  port=$(_hl_redirect_port)
+  command -v python3 >/dev/null || return 1
+  [[ -n "$port" ]] || return 1
+  log=$(mktemp "${TMPDIR:-/tmp}/hl_listen_cb.XXXXXX")
+  py="${log}.py"
+  cat > "$py" <<'PYEOF'
+import sys, http.server
+port, log = int(sys.argv[1]), sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _respond(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b'<html><body><h2>Logged in</h2><p>You can close this tab.</p></body></html>')
+    def do_GET(self):
+        with open(log, 'a') as f:
+            f.write(self.path + '\n')
+        self._respond()
+    do_POST = do_GET
+http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
+PYEOF
+  python3 "$py" "$port" "$log" &
+  pid=$!
+  trap '[[ -z "${pid:-}" ]] || kill "$pid" 2>/dev/null; rm -f "$py" "$log"' RETURN
+  # Give the user a moment to approve; poll the log for the callback URL.
+  echo "  Listening for the browser callback on http://localhost:$port …" >&2
+  while (( tries < 120 )); do
+    if [[ -s "$log" ]]; then
+      line=$(tail -1 "$log")
+      break
+    fi
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1; (( tries++ ))
+  done
+  trap - RETURN
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  rm -f "$py" "$log"
+  [[ -n "$line" ]] || return 1
+  printf '%s' "$line"
+}
+
 hl_login() {
   # Interactive PKCE login (current two-hop flow): print authorize URL,
-  # wait for the user to paste the callback URL from the browser, replay
-  # state to /auth/callback to obtain the code, then exchange for tokens.
+  # wait for the callback (auto-captured via a temp listener when the
+  # redirect URI is localhost, else paste-in), replay state to
+  # /auth/callback to obtain the code, then exchange for tokens.
   # When not configured yet, prompt for the App Key / Redirect URI first
   # and offer to save them for next time.
   if _hl_read_tokens; then
@@ -960,12 +1015,21 @@ hl_login() {
     xdg-open "$auth_url" 2>/dev/null &
   fi
   local try=0
+  # Auto-capture the callback when the redirect URI is a localhost port:
+  # spin up a throwaway HTTP server and wait for the browser to land on it.
+  if command -v python3 >/dev/null && _hl_redirect_port >/dev/null; then
+    if cb=$(_hl_listen_wait) 2>/dev/null; then
+      echo "  Callback received: $cb"
+    fi
+  fi
   while (( try < 3 )); do
     (( try++ ))
-    echo "After approving, copy the full URL from the browser's address bar"
-    echo "and paste it here. It starts with ${YVP_REDIRECT_URI} and may look"
-    echo "like a broken page — that's fine, the URL itself is what we need."
-    read -r cb
+    if [[ -z "${cb:-}" ]]; then
+      echo "After approving, copy the full URL from the browser's address bar"
+      echo "and paste it here. It starts with ${YVP_REDIRECT_URI} and may look"
+      echo "like a broken page — that's fine, the URL itself is what we need."
+      read -r cb
+    fi
     cb="${cb%%#*}"                # strip any fragment
     local cb_state cb_code cb_err
     cb_state=$(printf '%s' "$cb" | sed -n 's/^.*[?&]state=\([^&]*\).*$/\1/p')
@@ -975,6 +1039,7 @@ hl_login() {
       echo >&2 "  That looks like the authorize URL, not the callback URL."
       echo >&2 "  Approve in the browser first; your address bar will then show"
       echo >&2 "  ${YVP_REDIRECT_URI}?state=... — paste that one."
+      cb=""
       continue
     fi
     if [[ -n "$cb_err" ]]; then
@@ -984,11 +1049,13 @@ hl_login() {
       if [[ "$cb_err" == "invalid_request" && "$cb_ed" == *"redirect_uri"* ]]; then
         echo >&2 "  This means the Redirect URI in your config"
         echo >&2 "  ($YVP_REDIRECT_URI)"
-        echo >&2 "  does not match the callback URL registered in the YouVersion"
-        echo >&2 "  dev portal (https://developers.youversion.com/apps -> OAuth"
-        echo >&2 "  Settings). Copy the exact URI from there and re-run:"
+        echo >&2 "  does not match the \"callback url\" registered for this app in"
+        echo >&2 "  the YouVersion Platform Portal (https://platform.youversion.com"
+        echo >&2 "  -> App Management -> your app -> callback url). Set bible.sh to"
+        echo >&2 "  send exactly that value:"
         echo >&2 "    YVP_REDIRECT_URI='https://...' bible hl login"
-        echo >&2 "  or edit ~/.credentials/.bible_yvp_oauth."
+        echo >&2 "  or edit ~/.credentials/.bible_yvp_oauth. The callback URL is"
+        echo >&2 "  chosen when the app is created (and can be edited later)."
       fi
       return 1
     fi
@@ -1008,11 +1075,13 @@ hl_login() {
       if [[ -n "$cb_code" ]]; then break; fi
       echo >&2 "  No code yet — approve in the browser, then paste the callback"
       echo >&2 "  URL from the address bar again."
+      cb=""
       continue
     fi
     if [[ -n "$cb_code" ]]; then break; fi
     echo >&2 "  I couldn't find a code or state in that. Paste the full"
     echo >&2 "  callback URL from the browser's address bar."
+    cb=""
   done
   if [[ -z "${cb_code:-}" ]]; then
     echo "No authorization code." >&2
