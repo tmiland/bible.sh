@@ -912,6 +912,30 @@ _hl_write_tokens() {
   chmod 600 "$_YVP_HL_TOKEN_CACHE"
 }
 
+_hl_token_refresh() {
+  # Try to renew the access token using the stored refresh token.
+  # Writes the new tokens to cache on success. Returns 0 on success.
+  _hl_read_tokens || return 1
+  [[ -n "$_HL_REFRESH_TOKEN" ]] || return 1
+  local cid body
+  cid=$(_yvp_key) || return 1
+  body=$(_yvp_api_get "${_YVP_HL_BASE}/auth/token" \
+    --data-urlencode "grant_type=refresh_token" \
+    --data-urlencode "client_id=$cid" \
+    --data-urlencode "refresh_token=$_HL_REFRESH_TOKEN" \
+    2>/dev/null) || return 1
+  local new_access new_refresh new_id
+  new_access=$(printf '%s' "$body" | jq -r '.access_token // empty' 2>/dev/null)
+  new_refresh=$(printf '%s' "$body" | jq -r '.refresh_token // empty' 2>/dev/null)
+  new_id=$(printf '%s' "$body" | jq -r '.id_token // empty' 2>/dev/null)
+  [[ -n "$new_access" ]] || return 1
+  _HL_ACCESS_TOKEN="$new_access"
+  [[ -n "$new_refresh" ]] && _HL_REFRESH_TOKEN="$new_refresh"
+  [[ -n "$new_id" ]]      && _HL_ID_TOKEN="$new_id"
+  _hl_write_tokens
+  return 0
+}
+
 _hl_id_claims() {
   # Decode the id_token payload (base64url JWT). Echoes a JSON object with
   # name/email; empty output when the token is missing or unreadable.
@@ -1221,13 +1245,33 @@ _hl_default_bible_id() {
 
 _hl_fetch_passage() {
   # $1=bible_id $2=passage_id (chapter USFM, e.g. JHN.3). Echoes the
-  # data[] entries ("passage_id color" per line), nothing on failure.
-  _hl_read_tokens || return 1
-  local body
-  body=$(curl -s -m 20 \
+  # data[] entries ("passage_id color" per line) on success.
+  # Returns 1 and echoes an error message on failure.
+  # Automatically retries once after a token refresh on HTTP 401.
+  _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
+  local body tmpf http_code
+  tmpf=$(mktemp)
+  http_code=$(curl -s -m 20 -w '%{http_code}' -o "$tmpf" \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2") || return 1
+    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2") || { rm -f "$tmpf"; return 1; }
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 20 -w '%{http_code}' -o "$tmpf" \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2")
+  fi
+  if [[ "$http_code" != "200" ]]; then
+    rm -f "$tmpf"
+    if [[ "$http_code" == "401" ]]; then
+      echo "Access token expired and refresh failed. Run: bible hl login" >&2
+    else
+      echo "API error (HTTP $http_code). Run: bible hl login" >&2
+    fi
+    return 1
+  fi
+  body=$(cat "$tmpf" 2>/dev/null)
+  rm -f "$tmpf"
   printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null
 }
 
@@ -1244,9 +1288,9 @@ hl_list() {
     return 1
   fi
   local out
-  out=$(_hl_fetch_passage "$bid" "$pg")
+  out=$(_hl_fetch_passage "$bid" "$pg") || return 1
   if [[ -z "$out" ]]; then
-    echo "No highlights found (or not logged in — run: bible hl login)."
+    echo "No highlights in $pg."
     return 0
   fi
   printf '%s\n' "$out" | while IFS=' ' read -r pgid col; do
@@ -1265,17 +1309,40 @@ hl_add() {
   [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
   local rid
   rid=$(command -v uuidgen >/dev/null && uuidgen || printf '%s-%s' "$(date +%s)" "$RANDOM$RANDOM")
-  local body
-  body=$(curl -s -m 20 \
+  local payload http_code body
+  payload=$(printf '{"request_id":"%s","highlight":{"bible_id":%s,"passage_id":"%s","color":"%s"}}' \
+    "$rid" "$bid" "$pg" "$col")
+  http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
     -X POST \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "$(printf '{"request_id":"%s","highlight":{"bible_id":%s,"passage_id":"%s","color":"%s"}}' \
-      "$rid" "$bid" "$pg" "$col")" \
+    -d "$payload" \
     "${_YVP_HL_BASE}/v1/highlights") || return 1
-  printf '%s' "$body" | jq -r '"Highlighted \(.passage_id // .highlight.passage_id // "?") (\(.color // .highlight.color // ""))"' 2>/dev/null \
-    || printf '%s' "$body"
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
+      -X POST \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$payload" \
+      "${_YVP_HL_BASE}/v1/highlights")
+  fi
+  if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+    printf 'Highlighted %s (color #%s).\n' "$pg" "$col"
+  else
+    # Show the API error detail when available
+    body=$(curl -s -m 20 \
+      -X POST \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$payload" \
+      "${_YVP_HL_BASE}/v1/highlights")
+    echo "Highlight failed (HTTP $http_code)." >&2
+    printf '%s' "$body" | jq -r '.detail // .error // empty' 2>/dev/null >&2
+    return 1
+  fi
 }
 
 hl_delete() {
@@ -1285,12 +1352,33 @@ hl_delete() {
   local pg="${1:-}" bid="${2:-}"
   [[ -n "$pg" ]] || { echo "Usage: bible hl rm <passage_id> [bible_id]" >&2; return 1; }
   [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
-  curl -s -m 20 \
+  local http_code body
+  http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
     -X DELETE \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid" >/dev/null
-  echo "Cleared highlight(s) on $pg."
+    "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid") || return 1
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
+      -X DELETE \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid")
+  fi
+  if [[ "$http_code" == "200" || "$http_code" == "204" ]]; then
+    echo "Cleared highlight(s) on $pg."
+  elif [[ "$http_code" == "404" ]]; then
+    echo "No highlight on $pg (already clear)."
+  else
+    body=$(curl -s -m 20 \
+      -X DELETE \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid")
+    echo "Delete failed (HTTP $http_code)." >&2
+    printf '%s' "$body" | jq -r '.detail // .error // empty' 2>/dev/null >&2
+    return 1
+  fi
 }
 
 _hl_chapter_colors() {
@@ -1299,11 +1387,22 @@ _hl_chapter_colors() {
   # in that chapter. Silently no-ops when not logged in or on API errors.
   _HL_CHAPTER_COLORS=""
   _hl_read_tokens || return 0
-  local body
-  body=$(curl -s -m 10 \
+  local body tmpf
+  tmpf=$(mktemp)
+  local http_code
+  http_code=$(curl -s -m 10 -w '%{http_code}' -o "$tmpf" \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2") 2>/dev/null || return 0
+    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2" 2>/dev/null) || { rm -f "$tmpf"; return 0; }
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 10 -w '%{http_code}' -o "$tmpf" \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2" 2>/dev/null)
+  fi
+  [[ "$http_code" == "200" ]] || { rm -f "$tmpf"; return 0; }
+  body=$(cat "$tmpf" 2>/dev/null)
+  rm -f "$tmpf"
   local pgid col
   while read -r pgid col; do
     [[ -n "$pgid" && -n "$col" ]] || continue
@@ -4267,6 +4366,7 @@ if [[ $# -gt 0 ]]; then
     --no-update-check) BIBLE_NO_UPDATE_CHECK=1; main_menu ;;
     hl|highlights)
       shift
+      _hl_rc=0
       case "${1:-status}" in
         login) shift; hl_login ;;
         logout) shift; hl_logout ;;
@@ -4277,6 +4377,8 @@ if [[ $# -gt 0 ]]; then
         delete|rm) shift; hl_delete "$@" ;;
         *) hl_status ;;
       esac
+      _hl_rc=$?
+      exit "$_hl_rc"
       ;;
     *) usage; exit 1 ;;
   esac
