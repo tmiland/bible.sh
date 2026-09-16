@@ -4052,6 +4052,7 @@ if [[ $# -gt 0 ]]; then
       shift
       case "${1:-status}" in
         login) shift; hl_login ;;
+        config) shift; _hl_configure_prompt; _hl_config_save; echo "Saved to ~/.credentials/.bible_yvp_oauth and ~/.credentials/.bible.com_token." ;;
         approve) shift; hl_approve ;;
         list) shift; hl_list "${1:-}" ;;
         add) shift; hl_add "$@" ;;
