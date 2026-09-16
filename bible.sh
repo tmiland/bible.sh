@@ -1006,13 +1006,14 @@ hl_login() {
   _HL_STATE=$(_hl_rand 16)
   _HL_NONCE=$(_hl_rand 16)
   auth_url=$(hl_authorize_url) || return 1
-  echo "Open the following URL in your browser:"
-  echo
-  echo "  $auth_url"
-  echo
-  # Try to open automatically
+  # Open the authorize URL in the browser (silent). If no opener is
+  # available, print the URL so the user can open it manually.
   if command -v xdg-open >/dev/null; then
     xdg-open "$auth_url" 2>/dev/null &
+  else
+    echo "Open in your browser:"
+    echo "  $auth_url"
+    echo
   fi
   local try=0
   # Auto-capture the callback when the redirect URI is a localhost port:
