@@ -1228,8 +1228,9 @@ hl_approve() {
 # --- Highlights CRUD --------------------------------------------------
 
 hl_logout() {
-  # Clear cached OAuth tokens.
+  # Clear cached OAuth tokens (and any cached whole-Bible highlights).
   rm -f "$_YVP_HL_TOKEN_CACHE"
+  _hl_all_drop_all
   _HL_ACCESS_TOKEN=""
   _HL_REFRESH_TOKEN=""
   _HL_ID_TOKEN=""
@@ -1335,6 +1336,7 @@ hl_add() {
   fi
   if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
     printf 'Highlighted %s (color #%s).\n' "$pg" "$col"
+    _hl_all_drop "$bid"
   else
     # Show the API error detail when available
     body=$(curl -s -m 20 \
@@ -1372,8 +1374,10 @@ hl_delete() {
   fi
   if [[ "$http_code" == "200" || "$http_code" == "204" ]]; then
     echo "Cleared highlight(s) on $pg."
+    _hl_all_drop "$bid"
   elif [[ "$http_code" == "404" ]]; then
     echo "No highlight on $pg (already clear)."
+    _hl_all_drop "$bid"
   else
     body=$(curl -s -m 20 \
       -X DELETE \
@@ -3368,8 +3372,9 @@ bible.sh — the whole Bible in one shell file.
   status               bible status
                        Show locally installed versions.
 hl | highlights      bible hl login | list | add | rm | status
-                         One-time browser sign-in, then highlight verses;
-                         the menu (g) scans the whole Bible or one book.
+                         One-time browser sign-in, then highlight verses.
+                         The menu (g) lists every highlight (cached after
+                         the first whole-Bible scan — rescan to refresh).
   self-update | -u     bible self-update
                        Update this script from the GitHub repo: compares
                        the VERSION header, syntax-checks the download,
@@ -4049,34 +4054,88 @@ _hl_scan_all_fetch() {
   return 0
 }
 
+_hl_all_cache_file() {
+  # $1=bible_id. Echoes the path of the whole-Bible highlights cache file.
+  echo "$BIBLE_CACHE/hlv-$1.hl"
+}
+
+_hl_all_load() {
+  # $1=bible_id. Reads the cache file into _HL_ALL_HIGHLIGHTS ("OSIS.CH:V=RRGGBB "
+  # tokens). Returns 0 on success (cache exists, even if empty). Returns 1 when
+  # no cache is found; callers should scan and save.
+  _HL_ALL_HIGHLIGHTS=""
+  local f
+  f=$(_hl_all_cache_file "$1")
+  [[ -f "$f" ]] || return 1
+  grep -q '^#' "$f" || return 1   # comment marker = cache is valid
+  local line
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    _HL_ALL_HIGHLIGHTS+="$line "
+  done < "$f"
+  return 0
+}
+
+_hl_all_save() {
+  # $1=bible_id. Persists _HL_ALL_HIGHLIGHTS to the cache file so the next
+  # "List all highlights" call is instant.
+  local f
+  f=$(_hl_all_cache_file "$1")
+  mkdir -p "$(dirname "$f")"
+  {
+    echo "# Cached highlights for bible_id $1 — $(date -u +%FT%TZ)"
+    local tok
+    for tok in $_HL_ALL_HIGHLIGHTS; do
+      printf '%s\n' "$tok"
+    done
+  } > "$f"
+  chmod 600 "$f"
+}
+
+_hl_all_drop() {
+  # $1=bible_id. Removes the cache so the next "List all" rescans.
+  rm -f "$(_hl_all_cache_file "$1")"
+}
+
+_hl_all_drop_all() {
+  # Remove all highlights cache files (e.g. on logout).
+  rm -f "$BIBLE_CACHE"/hlv-*.hl
+}
+
 _hl_scan_bible() {
   # $1=bible_id. Scans every chapter of every book for highlights and
   # fills _HL_ALL_HIGHLIGHTS with "OSIS.CH:VERSE=RRGGBB " tokens in
   # canonical order. Retries once after a token refresh on a stale
-  # token. Returns non-zero on failure with _HL_ALL_ERROR set.
+  # token. Returns non-zero on failure with _HL_ALL_ERROR set. Saves the
+  # cache file on success.
   _HL_ALL_HIGHLIGHTS=""
   _HL_ALL_ERROR=""
   _hl_read_tokens || { _HL_ALL_ERROR="Not logged in. Run: bible hl login"; return 1; }
   local bid="$1"
   if _hl_scan_all_fetch "$bid" "$_HL_ACCESS_TOKEN"; then
+    _hl_all_save "$bid"
     return 0
   fi
   if _hl_token_refresh 2>/dev/null; then
     _HL_ALL_ERROR=""
     _HL_ALL_HIGHLIGHTS=""
-    _hl_scan_all_fetch "$bid" "$_HL_ACCESS_TOKEN" && return 0
+    _hl_scan_all_fetch "$bid" "$_HL_ACCESS_TOKEN" && { _hl_all_save "$bid"; return 0; }
   fi
   [[ -n "$_HL_ALL_ERROR" ]] || _HL_ALL_ERROR="Could not read highlights. Run: bible hl login"
   return 1
 }
 
 _hl_list_all() {
-  # $1=bible_id $2=version. Scans every chapter of the whole Bible for
-  # highlights, lists them all in canonical order, and opens the chapter
-  # of the one you pick (with inline markers).
+  # $1=bible_id $2=version. Lists every highlight of the whole Bible in
+  # canonical order and opens the chapter of the one you pick (with
+  # inline markers). Sits on the cached scan when it exists (instant);
+  # otherwise runs the full sweep once. The cache is dropped by hl add /
+  # hl rm / logout and refreshed via the "Rescan all highlights" pick.
   local bid="$1" ver="$2"
-  echo "Scanning the whole Bible for highlights (1,189 chapter requests — allow a minute on slow connections)…"
-  _hl_scan_bible "$bid"
+  if ! _hl_all_load "$bid"; then
+    echo "Scanning the whole Bible for the first time (~1,189 chapter requests — allow a minute on slow connections). Saved to cache for next time."
+    _hl_scan_bible "$bid"
+  fi
   if [[ -z "$_HL_ALL_HIGHLIGHTS" ]]; then
     if [[ -n "$_HL_ALL_ERROR" ]]; then
       echo "$_HL_ALL_ERROR"
@@ -4129,6 +4188,9 @@ menu_highlights() {
     picks+=("Browse ${name:-$osis} by highlights")
   fi
   picks+=("List all highlights")
+  if _hl_all_load "$bid" >/dev/null 2>&1; then
+    picks+=("Rescan all highlights")
+  fi
   picks+=("Pick a book…")
   if [[ -n "$osis" && -n "$ch" ]]; then
     picks+=("Highlights in ${name:-$osis} $ch")
@@ -4138,6 +4200,10 @@ menu_highlights() {
   [[ -z "$action" ]] && return
   case "$action" in
     "List all highlights")
+      _hl_list_all "$bid" "$ver"
+      ;;
+    "Rescan all highlights")
+      _hl_all_drop "$bid"
       _hl_list_all "$bid" "$ver"
       ;;
     "Pick a book…")

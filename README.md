@@ -320,16 +320,19 @@ inline with a colored ●** so you can see at a glance which verses you've
 underlined on the bright side.
 
 The Highlights entry in the menu (`g`) is a small **highlights browser**:
-it can scan the **whole Bible**, scan a single book (the one you're
-reading or any other), or jump straight to the current chapter's
-highlights. The whole-Bible view lists *every* highlighted verse in one
-flat, canon-ordered list; pick one and it opens that chapter with the
-markers inline.
+it can list **every highlight in the whole Bible**, scan a single book
+(the one you're reading or any other), or jump straight to the current
+chapter's highlights. The whole-Bible view lists *all* highlighted verses
+in one flat, canon-ordered list; pick one and it opens that chapter with
+the markers inline.
 
 YouVersion's API stores highlights per *verse group* as a color
 (`RRGGBB`), keyed by Bible version — there's no "list everything" call,
-so the browser queries each chapter in one parallel sweep (a 150-chapter
-book takes under two seconds; the whole 1,189 chapters takes under ten).
+so the browser queries each chapter in one parallel sweep. The full
+1,189-chapter sweep runs just once and is **cached on disk**; afterwards
+"List all highlights" is instant, and a "Rescan all highlights" option
+refreshes it (the cache is also dropped automatically whenever
+`bible hl add`, `bible hl rm` or `bible hl logout` runs).
 
 Everything the code needs is already built in: a shared public OAuth
 client_id (XOR-masked in the source so it never sits in plaintext, and

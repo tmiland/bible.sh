@@ -57,14 +57,15 @@ All notable changes to this project are documented in this file.
   and `bible hl rm <verse>` create/clear highlights (colors are `RRGGBB`).
   While reading or listening to a chapter, highlighted verses are marked
   inline with a colored ●. The menu Highlights entry (`g`) is now a
-  **highlights browser**: scan the whole Bible — or any single book —
-  for highlighted verses and open any chapter with the markers inline (a
-  parallel per-chapter sweep keeps a 150-chapter book under two seconds,
-  the whole 1,189 chapters under ten). The whole-Bible view lists every
-  highlighted verse in a flat, canon-ordered list; the current chapter's
-  highlighted verses are one keypress away in the same menu. (Highlights
-  are stored per chapter on the API — there is no "list everything"
-  call, so "all" means one parallel request per chapter.)
+  **highlights browser**: list the whole Bible — or scan any single book
+  — and open any chapter with the markers inline. The whole-Bible view
+  lists every highlighted verse flat in canon order. Since the API has
+  no "list everything" call (highlights are stored per chapter), the
+  full ~1,189-chapter sweep runs only once and is **cached on disk**:
+  "List all highlights" is instant afterwards, a "Rescan all highlights"
+  option refreshes it, and `bible hl add`/`hl rm`/`hl logout` drop the
+  cache automatically. The current chapter's highlighted verses are one
+  keypress away in the same menu.
 - **Zero-setup highlights login**: bible.sh ships with a shared YouVersion
   App Key (a public OAuth `client_id`, XOR-masked in the source so it never
   sits in plaintext). Most users just run `bible hl login` and approve in
