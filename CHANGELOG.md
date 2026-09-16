@@ -51,6 +51,12 @@ All notable changes to this project are documented in this file.
 - **Highlights account identity**: `bible hl status` decodes the cached
   `id_token` and shows the signed-in YouVersion account (`Account: Name
   <email>`) from the OpenID claims.
+- **Zero-setup highlights login**: bible.sh ships with a shared YouVersion
+  App Key (a public OAuth `client_id`, XOR-masked in the source so it never
+  sits in plaintext). Most users just run `bible hl login` and approve in
+  the browser — no Platform app registration needed. The key never appears
+  in the config wizard either. Override per-user via `YVP_APP_KEY` or
+  `bible hl config`.
 
 ## [1.2.0] - 2026-09-15
 
