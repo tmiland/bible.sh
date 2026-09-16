@@ -667,9 +667,13 @@ _yvp_key() {
   # Echo the configured app key (non-zero when none is set):
   # 1. $YVP_APP_KEY env var
   # 2. ~/.credentials/.bible.com_token
+  # 3. The built-in default for this distribution of bible.sh
   local key="${YVP_APP_KEY:-}"
   if [[ -z "$key" && -s "$_YVP_KEY_FILE" ]]; then
     key=$(cat "$_YVP_KEY_FILE")
+  fi
+  if [[ -z "$key" ]]; then
+    key="${_YVP_KEY_DEFAULT:-}"
   fi
   if [[ -z "$key" ]]; then
     return 1
@@ -790,6 +794,10 @@ _YVP_HL_TOKEN_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}/youve
 # and saved here; environment variable YVP_REDIRECT_URI always wins over
 # the saved value. The Platform App Key doubles as the OAuth client_id
 # (YVP_APP_KEY or ~/.credentials/.bible.com_token).
+# _YVP_KEY_DEFAULT is the public client_id shipped with this distribution;
+# see the README "Own your data" section. Users may override via
+# YVP_APP_KEY or `bible hl config`.
+_YVP_KEY_DEFAULT="${YVP_APP_KEY_DEFAULT:-}"
 _YVP_HL_CONFIG="$HOME/.credentials/.bible_yvp_oauth"
 _YVP_HL_REDIRECT_DEFAULT="http://localhost:8080/oauth"
 
@@ -812,17 +820,21 @@ _hl_config_save() {
 _hl_configure_prompt() {
   # Collect the Platform credentials interactively. The App Key is also
   # the OAuth client_id; the Redirect URI has to be registered with the
-  # app in the YouVersion Platform Portal and match exactly.
+  # app in the YouVersion Platform Portal and match exactly. A built-in
+  # default key ships with bible.sh, so most users never need this.
   local def
-  echo "Highlights sync needs a free YouVersion Platform app."
-  echo "  Register one at https://developers.youversion.com, then enter"
-  echo "  its App Key and Redirect URI (found under App Basic Info and"
-  echo "  OAuth Settings). Enter=skip keeps any already-saved values."
+  if [[ -n "$_YVP_KEY_DEFAULT" ]]; then
+    echo "  bible.sh ships with a shared YouVersion app key, so you usually"
+    echo "  don't need to configure anything — just run: bible hl login"
+  fi
+  echo "  (Optional) Use your own YouVersion Platform app instead: register"
+  echo "  one at https://developers.youversion.com, then enter its App Key"
+  echo "  and Redirect URI (found under App Basic Info and OAuth Settings)."
+  echo "  Enter=skip keeps any already-saved values."
   echo "  The Redirect URI only has to match exactly -- it never has to"
-  echo "  load. You'll paste the callback URL from the browser's address"
-  echo "  bar."
+  echo "  load."
   if _yvp_key >/dev/null 2>&1; then
-    echo "  App Key (saved): $(_yvp_key)"
+    echo "  App Key (in use): $(_yvp_key)"
   else
     echo "  App Key not found."
   fi
@@ -1239,7 +1251,11 @@ hl_delete() {
 hl_status() {
   _hl_config_load
   if _yvp_key >/dev/null 2>&1; then
-    echo "App Key:          set (also the OAuth client_id)"
+    if [[ -z "$_YVP_KEY_DEFAULT" || "$(_yvp_key)" != "$_YVP_KEY_DEFAULT" ]]; then
+      echo "App Key:          set (also the OAuth client_id)"
+    else
+      echo "App Key:          default (shipped with bible.sh; override in hl config)"
+    fi
   else
     echo "App Key:          not set"
   fi
