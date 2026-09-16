@@ -955,24 +955,54 @@ hl_login() {
   if command -v xdg-open >/dev/null; then
     xdg-open "$auth_url" 2>/dev/null &
   fi
-  echo "After approving, copy the full URL from the browser's address bar"
-  echo "(http://localhost:8080/oauth?state=…) and paste it here:"
-  read -r cb
-  cb="${cb%%#*}"                  # strip any fragment
-  local cb_state cb_code
-  cb_state=$(printf '%s' "$cb" | sed -n 's/^.*[?&]state=\([^&]*\).*$/\1/p')
-  cb_code=$(printf '%s' "$cb" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
-  if [[ -z "$cb_code" && -n "$cb_state" ]]; then
-    # First (state-only) callback: replay state to /auth/callback. A CLI
-    # can do this with curl -L; a browser cannot (fetch hides Location).
-    echo "Replaying state to obtain the authorization code…"
-    local eff
-    eff=$(curl -s -L -m 20 -o /dev/null -w '%{url_effective}' \
-      "${_YVP_HL_BASE}/auth/callback?state=$cb_state")
-    cb_code=$(printf '%s' "$eff" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
-  fi
-  if [[ -z "$cb_code" ]]; then
-    echo "No authorization code found in the pasted URL." >&2
+  local try=0
+  while (( try < 3 )); do
+    (( try++ ))
+    echo "After approving, copy the full URL from the browser's address bar"
+    echo "and paste it here. It starts with ${YVP_REDIRECT_URI} and may look"
+    echo "like a broken page — that's fine, the URL itself is what we need."
+    read -r cb
+    cb="${cb%%#*}"                # strip any fragment
+    local cb_state cb_code cb_err
+    cb_state=$(printf '%s' "$cb" | sed -n 's/^.*[?&]state=\([^&]*\).*$/\1/p')
+    cb_code=$(printf '%s' "$cb" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
+    cb_err=$(printf '%s' "$cb" | sed -n 's/^.*[?&]error=\([^&]*\).*$/\1/p')
+    if [[ "$cb" == *"auth/authorize"* || "$cb" == *"client_id="* ]]; then
+      echo >&2 "  That looks like the authorize URL, not the callback URL."
+      echo >&2 "  Approve in the browser first; your address bar will then show"
+      echo >&2 "  ${YVP_REDIRECT_URI}?state=... — paste that one."
+      continue
+    fi
+    if [[ -n "$cb_err" ]]; then
+      local cb_ed
+      cb_ed=$(printf '%s' "$cb" | sed -n 's/^.*[?&]error_description=\([^&]*\).*$/\1/p' | sed 's/+/ /g')
+      echo >&2 "  Authorization failed on YouVersion's side: $cb_err${cb_ed:+ ($cb_ed)}"
+      return 1
+    fi
+    if [[ -z "$cb_code" && -n "$cb_state" ]]; then
+      # First (state-only) callback: replay state to /auth/callback. A CLI
+      # can do this with curl -L; a browser cannot (fetch hides Location).
+      echo "  Obtaining the authorization code…"
+      local eff eff_err
+      eff=$(curl -s -L -m 20 -o /dev/null -w '%{url_effective}' \
+        "${_YVP_HL_BASE}/auth/callback?state=$cb_state")
+      cb_code=$(printf '%s' "$eff" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
+      eff_err=$(printf '%s' "$eff" | sed -n 's/^.*[?&]error=\([^&]*\).*$/\1/p')
+      if [[ -z "$cb_code" && -n "$eff_err" ]]; then
+        echo >&2 "  Authorization failed on YouVersion's side: $eff_err"
+        return 1
+      fi
+      if [[ -n "$cb_code" ]]; then break; fi
+      echo >&2 "  No code yet — approve in the browser, then paste the callback"
+      echo >&2 "  URL from the address bar again."
+      continue
+    fi
+    if [[ -n "$cb_code" ]]; then break; fi
+    echo >&2 "  I couldn't find a code or state in that. Paste the full"
+    echo >&2 "  callback URL from the browser's address bar."
+  done
+  if [[ -z "${cb_code:-}" ]]; then
+    echo "No authorization code." >&2
     return 1
   fi
   # Exchange code for tokens (App Key as client_id)
