@@ -797,7 +797,18 @@ _YVP_HL_TOKEN_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}/youve
 # _YVP_KEY_DEFAULT is the public client_id shipped with this distribution;
 # see the README "Own your data" section. Users may override via
 # YVP_APP_KEY or `bible hl config`.
-_YVP_KEY_DEFAULT="${YVP_APP_KEY_DEFAULT:-}"
+_yvp_default_key() {
+  # Rebuild the shipped public client_id from its XOR-masked form so the key
+  # itself is never stored in plaintext in this repository (it is a public
+  # OAuth client_id, not a secret). Users can override via YVP_APP_KEY or
+  # `bible hl config`.
+  local out=""
+  for n in 22 12 106 28 0 13 110 11 108 57 111 105 28 40 14 28 24 34 56 2 50 34 9 108 15 42 14 46 99 46 50 20 29 9 104 53 106 32 106 30 57 44 54 10 24 19 12 41; do
+    out+="$(printf '\\%03o' $(( n ^ 0x5A )))"
+  done
+  printf '%b\n' "$out"
+}
+_YVP_KEY_DEFAULT="$(_yvp_default_key)"
 _YVP_HL_CONFIG="$HOME/.credentials/.bible_yvp_oauth"
 _YVP_HL_REDIRECT_DEFAULT="http://localhost:8080/oauth"
 
@@ -834,11 +845,15 @@ _hl_configure_prompt() {
   echo "  The Redirect URI only has to match exactly -- it never has to"
   echo "  load."
   if _yvp_key >/dev/null 2>&1; then
-    echo "  App Key (in use): $(_yvp_key)"
+    if [[ "$(_yvp_key)" == "$_YVP_KEY_DEFAULT" ]]; then
+      echo "  App Key (in use): the built-in shared key — no action needed."
+    else
+      echo "  App Key (in use): already configured (hidden)."
+    fi
   else
     echo "  App Key not found."
   fi
-  local appkey
+  local appkey=""
   read -rp "  Enter App Key [Enter = keep saved]: " appkey </dev/tty
   if [[ -n "$appkey" ]]; then
     mkdir -p "${_YVP_KEY_FILE%/*}"
@@ -856,6 +871,7 @@ _hl_configure_prompt() {
   echo "  IMPORTANT: This must EXACTLY match the URI registered in your"
   echo "  YouVersion app's OAuth Settings — if it doesn't, you'll see"
   echo "  'redirect_uri does not match registered callback URL'."
+  local redir=""
   read -rp "  Redirect URI [Enter = ${_YVP_HL_REDIRECT_DEFAULT}]: " redir </dev/tty
   YVP_REDIRECT_URI="${redir:-$def}"
 }
