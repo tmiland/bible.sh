@@ -2738,28 +2738,33 @@ search() {
     num=1
   fi
 
-  # Offline-first: search the local database when the requested
-  # version is installed locally.
-  if [[ "$version" == "KJV" ]] && _offline_is_installed "KJV"; then
-    if local_search "$query" "$version"; then
+  # API-first search: when an app key is set and the requested version
+  # is licensed to it, search the official Platform API (one request per
+  # page of references). Interactive contexts let you pick a match to
+  # open its chapter or page through the rest; non-interactive ones
+  # print the page. The API answer is final even when it has no matches
+  # (its "did you mean" hints are part of the feature set). Only when
+  # the API cannot run (no key / not licensed / request failed) do we
+  # fall back, first to the local database, then to the bible.com
+  # scraping search.
+  local api_id rc
+  if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
+    if [[ -t 0 ]]; then
+      _yvp_search_loop "$api_id" "$query" "$version" "$num"
+      rc=$?
+      # 0 = user picked/backed out (finished); anything else = the API
+      # request failed → fall through to local.
+      (( rc == 0 )) && return 0
+    elif _yvp_search "$api_id" "$query" >/dev/null 2>&1; then
+      _yvp_search_render "$num" "$version"
       return 0
     fi
   fi
 
-  # API-first search: when an app key is set and the requested
-  # version is licensed to it, search the official Platform API (one
-  # request per page of references). Interactive contexts let you pick
-  # a match to open its chapter or page through the rest; non-interactive
-  # ones print the page of references. Falls back to the bible.com
-  # scraping search below when the API request cannot run.
-  local api_id
-  if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
-    if [[ -t 0 ]]; then
-      _yvp_search_loop "$api_id" "$query" "$version" "$num"
-      return $?
-    fi
-    if _yvp_search "$api_id" "$query" >/dev/null 2>&1; then
-      _yvp_search_render "$num" "$version"
+  # Offline fallback: search the local database when the requested
+  # version is installed locally.
+  if [[ "$version" == "KJV" ]] && _offline_is_installed "KJV"; then
+    if local_search "$query" "$version"; then
       return 0
     fi
   fi
@@ -2946,11 +2951,11 @@ usage() {
   --help      | -h     Show this help text.
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
-                       Search the offline KJV database first, then the
-                       YouVersion Platform API (licensed versions) as a
-                       pickable list of references with pagination and
-                       "did you mean" suggestions, falling back to the
-                       bible.com search page.
+                       Search the YouVersion Platform API first
+                       (licensed versions), with a pickable list of
+                       references, pagination and "did you mean"
+                       suggestions. Falls back to the offline KJV
+                       database, then the bible.com search page.
   --votd      | -v     bible -v
   proverb              bible proverb
                        The chapter of Proverbs matching today's date

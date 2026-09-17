@@ -134,14 +134,13 @@ bible -c Isaiah 54 17 $compare_versions
 bible -s "<keywords>"
 ```
 
-Searches the offline KJV database first. When that misses (or the
-requested version is a licensed YouVersion edition), the Platform API
-returns a **pickable list of references** — one request per page, no
-per-verse fetching — with pagination via the next-page token and
-"did you mean" / "search instead for" hints surfaced. Interactive runs
-let you pick a match to open its chapter or page through the rest;
-non-interactive ones print the page of references. Falls back to the
-bible.com search page when no app key is configured.
+Searches the YouVersion Platform API first (for licensed versions): a
+**pickable list of references** — one request per page, no per-verse
+fetching — with pagination via the next-page token and "did you mean" /
+"search instead for" hints surfaced. Interactive runs let you pick a
+match to open its chapter or page through the rest; non-interactive
+ones print the page of references. Falls back to the offline KJV
+database, then the bible.com search page, when the API can't run.
 
 ### 📖 Flexible reference parsing
 
@@ -294,8 +293,9 @@ line per book).
 
 Read and search your *licensed* versions through `api.youversion.com`
 — faster, richer search metadata, and the same verses you already get.
-Active only when an app key is configured and the requested version is
-licensed; otherwise everything falls back to the regular scraping paths.
+Active when an app key is configured and the requested version is
+licensed; otherwise everything falls back to the regular scraping
+paths.
 
 ## ⭐ Highlights
 
