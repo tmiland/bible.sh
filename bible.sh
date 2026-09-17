@@ -839,13 +839,13 @@ _yvp_search_render() {
   done
   if (( n == 0 )); then
     echo "No matches in $ver."
-    if [[ -n "$_YVP_SEARCH_RATHER" ]]; then
-      echo "Search instead for: $_YVP_SEARCH_RATHER"
-    elif [[ -n "$_YVP_SEARCH_DYM" ]]; then
-      echo "Did you mean: $_YVP_SEARCH_DYM"
-    fi
   elif [[ -n "$_YVP_SEARCH_NEXT" ]]; then
     echo "(more results available)"
+  fi
+  if [[ -n "$_YVP_SEARCH_DYM" ]]; then
+    echo "Did you mean: $_YVP_SEARCH_DYM"
+  elif [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$_YVP_SEARCH_QUERY" ]]; then
+    echo "Search instead for: $_YVP_SEARCH_RATHER"
   fi
   divider_line
 }
@@ -876,7 +876,7 @@ _yvp_search_loop() {
       vals+=("OPEN|$ref|$book")
     done
     [[ -n "$_YVP_SEARCH_NEXT" ]] && { picks+=("Next page of results"); vals+=("NEXT"); }
-    [[ -n "$_YVP_SEARCH_RATHER" ]] && { picks+=("Search instead for: $_YVP_SEARCH_RATHER"); vals+=("DYM|$_YVP_SEARCH_RATHER"); }
+    [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$q" ]] && { picks+=("Search instead for: $_YVP_SEARCH_RATHER"); vals+=("DYM|$_YVP_SEARCH_RATHER"); }
     [[ -n "$_YVP_SEARCH_DYM" ]] && { picks+=("Did you mean: $_YVP_SEARCH_DYM"); vals+=("DYM|$_YVP_SEARCH_DYM"); }
     if (( ${#picks[@]} == 0 )); then
       echo "(nothing to open — back to the menu.)"
