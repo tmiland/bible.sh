@@ -656,10 +656,20 @@ offline_status() {
 ## App key: https://developers.youversion.com — 48 chars, sent as the
 ## x-yvp-app-key header (not a secret). Rate-limited: 429 + Retry-After.
 
-_YVP_API="https://api.youversion.com/v1"
+_YVP_API="${YVP_API_BASE:-https://api.youversion.com}/v1"
 _YVP_KEY_FILE="$HOME/.credentials/.bible.com_token"
 BIBLE_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}"
 _YVP_KEY_CACHE="$BIBLE_CACHE/bibles"
+# Last /v1/search-verses response (raw JSON) plus parsed metadata for
+# the search pager: _YVP_SEARCH_QUERY (the query it answered),
+# _YVP_SEARCH_NEXT (pagination token, empty = no more results),
+# _YVP_SEARCH_DYM ("did you mean" suggestions), _YVP_SEARCH_RATHER
+# ("search instead for" hint).
+_YVP_SEARCH_JSON=""
+_YVP_SEARCH_QUERY=""
+_YVP_SEARCH_NEXT=""
+_YVP_SEARCH_DYM=""
+_YVP_SEARCH_RATHER=""
 
 # --- Key / licensing --------------------------------------------------
 
@@ -746,13 +756,140 @@ _yvp_passage_text() {
 }
 
 _yvp_search() {
-  # $1 = platform bible id, $2 = query, $3 = max results.
-  # Echo one USFM reference per line for matching verses.
-  local bid="$1" query="$2" total="${3:-5}" body
-  body=$(_yvp_api_get "$_YVP_API/search-verses" \
-    -G --data-urlencode "query=$query" --data-urlencode "bible_id=$bid" \
-    --data-urlencode "page_size=$total") || return 1
-  printf '%s' "$body" | jq -r '.verses[]?.reference' 2>/dev/null
+  # $1 = platform bible id, $2 = query, $3 = results per page (default
+  # 20), $4 = next_page_token (optional). Echoes one USFM reference per
+  # line for the matching verses and sets the _YVP_SEARCH_* globals
+  # (raw response, query, pagination token, "did you mean" / "search
+  # instead for" suggestions). Non-zero only when the request fails.
+  local bid="$1" query="$2" total="${3:-20}" token="${4:-}"
+  local url="$_YVP_API/search-verses"
+  _YVP_SEARCH_JSON=""
+  _YVP_SEARCH_QUERY="$query"
+  _YVP_SEARCH_NEXT=""
+  _YVP_SEARCH_DYM=""
+  _YVP_SEARCH_RATHER=""
+  if [[ -n "$token" ]]; then
+    _YVP_SEARCH_JSON=$(_yvp_api_get "$url" \
+      -G --data-urlencode "query=$query" --data-urlencode "bible_id=$bid" \
+      --data-urlencode "page_size=$total" \
+      --data-urlencode "next_page_token=$token") || return 1
+  else
+    _YVP_SEARCH_JSON=$(_yvp_api_get "$url" \
+      -G --data-urlencode "query=$query" --data-urlencode "bible_id=$bid" \
+      --data-urlencode "page_size=$total") || return 1
+  fi
+  _YVP_SEARCH_NEXT=$(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.next_page_token // empty' 2>/dev/null)
+  _YVP_SEARCH_DYM=$(printf '%s' "$_YVP_SEARCH_JSON" | jq -r \
+    '.did_you_mean | if type == "array" then (map(select(. != "")) | join(", ")) else . end // empty' 2>/dev/null)
+  _YVP_SEARCH_RATHER=$(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.search_instead_for // empty' 2>/dev/null)
+  printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null
+}
+
+_yvp_search_render() {
+  # $1 = web version id (for links), $2 = version name. Print the page
+  # of refs held in _YVP_SEARCH_JSON as plain cards — each one a
+  # reference plus its bible.com link, no verse text (that is fetched
+  # when a match is opened) — plus any no-match / suggestion hints.
+  local num="$1" ver="$2"
+  local -a refs
+  local ref book cv n=0
+  mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
+  echo ""
+  echo "Search results from YouVersion Platform API — \"${_YVP_SEARCH_QUERY:-}\""
+  echo ""
+  divider_line
+  for ref in "${refs[@]}"; do
+    [[ -z "$ref" ]] && continue
+    n=$((n + 1))
+    book=$(_yvp_book_name "${ref%%.*}")
+    cv="${ref#*.}"
+    cv="${cv%%.*}:${cv##*.}"
+    printf "${BOLD}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$book" "$cv" "$ver"
+    printf "${BLUE}https://www.bible.com/bible/%s/%s.%s${NC}\n" "$num" "$ref" "$ver"
+    echo ""
+  done
+  if (( n == 0 )); then
+    echo "No matches in $ver."
+    if [[ -n "$_YVP_SEARCH_RATHER" ]]; then
+      echo "Search instead for: $_YVP_SEARCH_RATHER"
+    elif [[ -n "$_YVP_SEARCH_DYM" ]]; then
+      echo "Did you mean: $_YVP_SEARCH_DYM"
+    fi
+  elif [[ -n "$_YVP_SEARCH_NEXT" ]]; then
+    echo "(more results available)"
+  fi
+  divider_line
+}
+
+_yvp_search_loop() {
+  # $1 = platform bible id, $2 = query, $3 = version name, $4 = web
+  # version id. Interactive API search pager: page through results with
+  # one request at a time, open a match by number, follow a "did you
+  # mean" suggestion, or go back.
+  local bid="$1" q="$2" ver="$3" num="$4"
+  local token="" page=20
+  local -a refs picks vals
+  local i ref book cv choice
+  while :; do
+    _yvp_search "$bid" "$q" "$page" "$token" >/dev/null || {
+      echo "The search service isn't answering (rate limit or offline). Try again shortly." >&2
+      return 1
+    }
+    _yvp_search_render "$num" "$ver"
+    picks=(); vals=()
+    mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
+    for ref in "${refs[@]}"; do
+      [[ -z "$ref" ]] && continue
+      book=$(_yvp_book_name "${ref%%.*}")
+      cv="${ref#*.}"
+      cv="${cv%%.*}:${cv##*.}"
+      picks+=("$book $cv")
+      vals+=("OPEN|$ref|$book")
+    done
+    [[ -n "$_YVP_SEARCH_NEXT" ]] && { picks+=("Next page of results"); vals+=("NEXT"); }
+    [[ -n "$_YVP_SEARCH_RATHER" ]] && { picks+=("Search instead for: $_YVP_SEARCH_RATHER"); vals+=("DYM|$_YVP_SEARCH_RATHER"); }
+    [[ -n "$_YVP_SEARCH_DYM" ]] && { picks+=("Did you mean: $_YVP_SEARCH_DYM"); vals+=("DYM|$_YVP_SEARCH_DYM"); }
+    if (( ${#picks[@]} == 0 )); then
+      echo "(nothing to open — back to the menu.)"
+      return 0
+    fi
+    echo ""
+    choice=$(pick_from_list "Open a match (or Back):" "${picks[@]}")
+    [[ -z "$choice" ]] && return 0
+    for i in "${!picks[@]}"; do
+      if [[ "${picks[$i]}" == "$choice" ]]; then
+        choice="${vals[$i]}"
+        break
+      fi
+    done
+    case "$choice" in
+      NEXT)
+        token="$_YVP_SEARCH_NEXT"
+        ;;
+      DYM\|*)
+        q="${choice#DYM|}"
+        token=""
+        ;;
+      OPEN\|*)
+        ref="${choice#OPEN|}"
+        ref="${ref%%|*}"
+        _yvp_search_open "$ref" "$ver" "${choice##*|}"
+        return 0
+        ;;
+      *) return 0 ;;
+    esac
+  done
+}
+
+_yvp_search_open() {
+  # $1 = USFM reference (e.g. "JHN.3.16"), $2 = version name,
+  # $3 = display book name. Opens the chapter containing the matched
+  # verse and saves it as the reading spot.
+  local ref="$1" ver="$2" name="${3:-}"
+  local osis="${ref%%.*}" cv="${ref#*.}"
+  local ch="${cv%%.*}"
+  show_chapter "$osis" "$ch" "$ver" "${name:-$osis}"
+  save_place "$osis|${name:-$osis}|$ch|$ver"
 }
 
 _yvp_book_name() {
@@ -2610,38 +2747,21 @@ search() {
   fi
 
   # API-first search: when an app key is set and the requested
-  # version is licensed to it, search the official Platform API and
-  # render each matched reference. Falls back to the bible.com
-  # scraping search below on any failure.
-  local api_id api_ref api_desc api_book api_cv api_link
+  # version is licensed to it, search the official Platform API (one
+  # request per page of references). Interactive contexts let you pick
+  # a match to open its chapter or page through the rest; non-interactive
+  # ones print the page of references. Falls back to the bible.com
+  # scraping search below when the API request cannot run.
+  local api_id
   if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
-    echo ""
-    echo "Search results from YouVersion Platform API"
-    echo ""
-    divider_line
-    while IFS= read -r api_ref; do
-      [[ -z "$api_ref" ]] && continue
-      api_desc=$(_yvp_passage_text "$api_id" "$api_ref" 2>/dev/null)
-      [[ -n "$api_desc" ]] || continue
-      api_book=$(_yvp_book_name "${api_ref%%.*}")
-      api_cv="${api_ref#*.}"
-      api_cv="${api_cv%%.*}:${api_cv##*.}"
-      api_link="https://www.bible.com/bible/$num/$api_ref.$version"
-      description="$api_desc"
-      book="$api_book"
-      chapter_verse="$api_cv"
-      version="$version"
-      link="$api_link"
-      if [[ $description =~ $BQUOTE ]] || [[ $description =~ $EQUOTE ]]; then
-        BQUOTE=''
-        EQUOTE=''
-      fi
-      output_correction
-      output "$description" "$book" "$chapter_verse" "$version" "$link"
-      divider_line
-      sleep 0.1
-    done < <(_yvp_search "$api_id" "$query" 3)
-    return 0
+    if [[ -t 0 ]]; then
+      _yvp_search_loop "$api_id" "$query" "$version" "$num"
+      return $?
+    fi
+    if _yvp_search "$api_id" "$query" >/dev/null 2>&1; then
+      _yvp_search_render "$num" "$version"
+      return 0
+    fi
   fi
 
   get_url_id=$(
@@ -2826,6 +2946,11 @@ usage() {
   --help      | -h     Show this help text.
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
+                       Search the offline KJV database first, then the
+                       YouVersion Platform API (licensed versions) as a
+                       pickable list of references with pagination and
+                       "did you mean" suggestions, falling back to the
+                       bible.com search page.
   --votd      | -v     bible -v
   proverb              bible proverb
                        The chapter of Proverbs matching today's date

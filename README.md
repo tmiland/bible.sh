@@ -134,6 +134,15 @@ bible -c Isaiah 54 17 $compare_versions
 bible -s "<keywords>"
 ```
 
+Searches the offline KJV database first. When that misses (or the
+requested version is a licensed YouVersion edition), the Platform API
+returns a **pickable list of references** — one request per page, no
+per-verse fetching — with pagination via the next-page token and
+"did you mean" / "search instead for" hints surfaced. Interactive runs
+let you pick a match to open its chapter or page through the rest;
+non-interactive ones print the page of references. Falls back to the
+bible.com search page when no app key is configured.
+
 ### 📖 Flexible reference parsing
 
 `-b`, `-c`, `-l` and `-t` parse references flexibly — colon or space,
