@@ -660,6 +660,10 @@ _YVP_API="${YVP_API_BASE:-https://api.youversion.com}/v1"
 _YVP_KEY_FILE="$HOME/.credentials/.bible.com_token"
 BIBLE_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}"
 _YVP_KEY_CACHE="$BIBLE_CACHE/bibles"
+# How long the licensed-version list stays fresh before being re-checked
+# against the API (minutes). 1440 = 1 day, so a newly licensed version
+# becomes searchable within a day, no manual remapping needed.
+_YVP_KEY_CACHE_TTL_MIN="${_YVP_KEY_CACHE_TTL_MIN:-1440}"
 # Last /v1/search-verses response (raw JSON) plus parsed metadata for
 # the search pager: _YVP_SEARCH_QUERY (the query it answered),
 # _YVP_SEARCH_NEXT (pagination token, empty = no more results),
@@ -670,6 +674,10 @@ _YVP_SEARCH_QUERY=""
 _YVP_SEARCH_NEXT=""
 _YVP_SEARCH_DYM=""
 _YVP_SEARCH_RATHER=""
+# Verse-text cache keyed by USFM ref: fetched once per reference via
+# /passages, reused across page turns and the interactive picker so a
+# repeated/navigated page does not refetch.
+declare -A _YVP_TEXT_CACHE
 
 # --- Key / licensing --------------------------------------------------
 
@@ -729,7 +737,7 @@ _yvp_bible_id() {
   local id=""
   _yvp_key >/dev/null 2>&1 || return 1 # no key → caller falls back to scraping
   cache="$_YVP_KEY_CACHE-$lang.json"
-  if [[ -f "$cache" ]] && [[ -n "$(find "$cache" -mmin -20160 2>/dev/null)" ]]; then
+  if [[ -f "$cache" ]] && [[ -n "$(find "$cache" -mmin -${_YVP_KEY_CACHE_TTL_MIN} 2>/dev/null)" ]]; then
     json=$(<"$cache")
   elif json=$(_yvp_api_get "$_YVP_API/bibles?language_ranges[]=$lang&fields[]=id&fields[]=abbreviation&page_size=*"); then
     mkdir -p "$BIBLE_CACHE"
@@ -796,13 +804,16 @@ _yvp_search() {
 }
 
 _yvp_search_render() {
-  # $1 = web version id (for links), $2 = version name. Print the page
-  # of refs held in _YVP_SEARCH_JSON as plain cards — each one a
-  # reference plus its bible.com link, no verse text (that is fetched
-  # when a match is opened) — plus any no-match / suggestion hints.
-  local num="$1" ver="$2"
+  # $1 = web version id (for links), $2 = version name,
+  # $3 = platform bible id (for verse text). Print the page of refs
+  # held in _YVP_SEARCH_JSON as cards — each one the verse text (one
+  # /passages request the first time, then cached) with the reference
+  # as its caption, plus any no-match / suggestion hints. Requests stay
+  # bounded to one search request + at most page_size verse fetches per
+  # page shown, and a failed fetch degrades to the ref + link only.
+  local num="$1" ver="$2" bid="${3:-}"
   local -a refs
-  local ref book cv n=0
+  local ref book cv text n=0
   mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
   echo ""
   echo "Search results from YouVersion Platform API — \"${_YVP_SEARCH_QUERY:-}\""
@@ -811,9 +822,17 @@ _yvp_search_render() {
   for ref in "${refs[@]}"; do
     [[ -z "$ref" ]] && continue
     n=$((n + 1))
+    text="${_YVP_TEXT_CACHE[$ref]:-}"
+    if [[ -z "$text" && -n "$bid" ]]; then
+      text=$(_yvp_passage_text "$bid" "$ref" 2>/dev/null) || text=""
+      [[ -n "$text" ]] && _YVP_TEXT_CACHE[$ref]="$text"
+    fi
     book=$(_yvp_book_name "${ref%%.*}")
     cv="${ref#*.}"
     cv="${cv%%.*}:${cv##*.}"
+    if [[ -n "$text" ]]; then
+      printf "${BQUOTE}%s${EQUOTE}\n" "$(printf '%s' "$text" | fold -w "${width}" -s)"
+    fi
     printf "${BOLD}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$book" "$cv" "$ver"
     printf "${BLUE}https://www.bible.com/bible/%s/%s.%s${NC}\n" "$num" "$ref" "$ver"
     echo ""
@@ -845,7 +864,7 @@ _yvp_search_loop() {
       echo "The search service isn't answering (rate limit or offline). Try again shortly." >&2
       return 1
     }
-    _yvp_search_render "$num" "$ver"
+    _yvp_search_render "$num" "$ver" "$bid"
     picks=(); vals=()
     mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
     for ref in "${refs[@]}"; do
@@ -2832,7 +2851,7 @@ search() {
   # the API cannot run (no key / not licensed / request failed) do we
   # fall back, first to the local database, then to the bible.com
   # scraping search.
-  local api_id rc
+  local api_id rc api_notice=""
   if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
     if [[ -t 0 || -n "$force_loop" ]]; then
       _yvp_search_loop "$api_id" "$query" "$version" "$num"
@@ -2841,10 +2860,19 @@ search() {
       # request failed → fall through to local.
       (( rc == 0 )) && return 0
     elif _yvp_search "$api_id" "$query" >/dev/null 2>&1; then
-      _yvp_search_render "$num" "$version"
+      _yvp_search_render "$num" "$version" "$api_id"
       return 0
     fi
+    api_notice="YouVersion API search didn't answer (offline now, or rate-limited). Showing local/online results instead:"
+  elif [[ -z "$(_yvp_key 2>/dev/null)" ]]; then
+    # No app key configured: the API leg never runs, so skip the
+    # error noise and let the regular fallbacks take over.
+    api_notice=""
+  else
+    api_notice="YouVersion API search isn't licensed for \"$version\" (or no cached license). Showing local/online results instead:"
   fi
+
+  [[ -n "$api_notice" ]] && echo "${DIM}$api_notice${NC}"
 
   # Offline fallback: search the local database when the requested
   # version is installed locally.
@@ -3037,10 +3065,10 @@ usage() {
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
                        Search the YouVersion Platform API first
-                       (licensed versions), with a pickable list of
-                       references, pagination and "did you mean"
-                       suggestions. Falls back to the offline KJV
-                       database, then the bible.com search page.
+                       (licensed versions): a pickable list of results
+                       with the verse text shown, pagination and "did
+                       you mean" suggestions. Falls back to the offline
+                       KJV database, then the bible.com search page.
   --votd      | -v     bible -v
   proverb              bible proverb
                        The chapter of Proverbs matching today's date

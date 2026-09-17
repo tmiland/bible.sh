@@ -7,13 +7,18 @@ All notable changes to this project are documented in this file.
 ### Added
 - **API search rework**: `--search` (`-s`) searches the YouVersion
   platform **first** (not offline-first) for licensed versions, via
-  `/v1/search-verses`, returning a **pickable list of references**
-  (default page size 20). Interactive runs let you open a match's
-  chapter or page through the rest with one request per page; the API
-  answer is final (its empty no-match state surfaces "did you mean" /
+  `/v1/search-verses`, returning a **pickable list of results that
+  shows the verse text** (verse text is fetched once per reference and
+  cached for the session; requests stay bounded to one search + at most
+  `page_size` passage fetches per shown page). Interactive runs let
+  you open a match's chapter or page through the rest; the API answer
+  is final (its empty no-match state surfaces "did you mean" /
   "search instead for" hints). Only when the API can't run does search
   fall back to the offline KJV database, then the bible.com search
-  page.
+  page — and it says so. The licensed-version list is cached for one
+  day (`_YVP_KEY_CACHE_TTL_MIN`, default 1440), so newly licensed
+  versions appear within a day without remapping (lookup falls back to
+  an abbreviation match).
 - `bible self-update` (`-u`): fetch the latest `bible.sh` from the
   GitHub repo, compare the `VERSION` header, bash syntax-check the
   download and swap it in atomically. Prompts before overwriting
