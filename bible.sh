@@ -2799,6 +2799,9 @@ search() {
   num=
   query=${1:-}
   version=${2:-}
+  # $3 optional: "menu" forces the interactive picker loop even when
+  # stdin is not a tty (the menu reads keys from /dev/tty, not fd 0).
+  local force_loop="${3:-}"
 
   # Default to KJV when no version was given (mirrors args()).
   if [[ -z "$version" ]]; then
@@ -2821,7 +2824,7 @@ search() {
   # scraping search.
   local api_id rc
   if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
-    if [[ -t 0 ]]; then
+    if [[ -t 0 || -n "$force_loop" ]]; then
       _yvp_search_loop "$api_id" "$query" "$version" "$num"
       rc=$?
       # 0 = user picked/backed out (finished); anything else = the API
@@ -3828,7 +3831,7 @@ menu_search() {
   read -rp "Keywords: " q </dev/tty
   [[ -z "$q" ]] && return
   read -rp "Version [$DEF_VERSION]: " v </dev/tty
-  search "$q" "${v:-$DEF_VERSION}"
+  search "$q" "${v:-$DEF_VERSION}" menu
   pause
 }
 
