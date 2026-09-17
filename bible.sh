@@ -719,12 +719,14 @@ code=$(curl -s -m 20 -w '%{http_code}' -D "$hdr" -o "$tmp" -H "x-yvp-app-key: $(
 }
 
 _yvp_bible_id() {
-  # $1 = web version id (version_case num), $2 = lang (en).
+  # $1 = web version id (version_case num), $2 = lang (en),
+  # $3 = version abbreviation (fallback when $1 is empty or unmapped).
   # Echo the Platform API bible id when that version is licensed to
   # the configured key, else non-zero. The API reuses the same
   # canonical ids as bible.com (NIV11=111, AMP=1588, GNV=2163), so
   # this is purely a licensing check against a TTL-cached collection.
-  local num="$1" lang="${2:-en}" cache json id
+  local num="$1" lang="${2:-en}" abbr="${3:-}" cache json
+  local id=""
   _yvp_key >/dev/null 2>&1 || return 1 # no key → caller falls back to scraping
   cache="$_YVP_KEY_CACHE-$lang.json"
   if [[ -f "$cache" ]] && [[ -n "$(find "$cache" -mmin -20160 2>/dev/null)" ]]; then
@@ -737,8 +739,16 @@ _yvp_bible_id() {
   else
     return 1
   fi
-  id=$(printf '%s' "$json" | jq -r --arg n "$num" \
-    '[.data[]? | select((.id|tostring)==$n) | .id][0] // empty' 2>/dev/null)
+  if [[ -n "$num" ]]; then
+    id=$(printf '%s' "$json" | jq -r --arg n "$num" \
+      '[.data[]? | select((.id|tostring)==$n) | .id][0] // empty' 2>/dev/null)
+  fi
+  # Fallback: match the version abbreviation case-insensitively so a
+  # newly licensed version works even before version_case maps it.
+  if [[ -z "$id" && -n "$abbr" ]]; then
+    id=$(printf '%s' "$json" | jq -r --arg a "${abbr^^}" \
+      '[.data[]? | select((.abbreviation|ascii_upcase)==$a) | .id][0] // empty' 2>/dev/null)
+  fi
   [[ -n "$id" ]] || return 1
   printf '%s' "$id"
 }
@@ -2386,7 +2396,7 @@ bible() {
   # failure — that path stays byte-for-byte untouched as the default.
   if [[ -z "${BIBLE_ONLINE_ONLY:-}" ]]; then
     local api_id api_usfm api_desc
-    if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
+    if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
       if [[ -n "$verse_range" ]]; then
         api_usfm="$bible_book.$chapter.$verse_range"
       elif [[ "$verse" =~ ^[[:digit:]]+$ ]]; then
@@ -2823,7 +2833,7 @@ search() {
   # fall back, first to the local database, then to the bible.com
   # scraping search.
   local api_id rc
-  if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
+  if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
     if [[ -t 0 || -n "$force_loop" ]]; then
       _yvp_search_loop "$api_id" "$query" "$version" "$num"
       rc=$?
