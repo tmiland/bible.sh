@@ -678,6 +678,9 @@ _YVP_SEARCH_RATHER=""
 # /passages, reused across page turns and the interactive picker so a
 # repeated/navigated page does not refetch.
 declare -A _YVP_TEXT_CACHE
+# Live typeahead suggestions (populated by _yvp_suggest_live).
+_SUG_TERMS=()
+_SUG_INFO=""
 
 # --- Key / licensing --------------------------------------------------
 
@@ -761,6 +764,128 @@ _yvp_bible_id() {
   printf '%s' "$id"
 }
 
+_yvp_suggest_live() {
+  # $1 = version name, $2 = keyword prefix. Fills _SUG_TERMS (array of
+  # suggestion words) and _SUG_INFO (short status line, e.g. "12
+  # matches"). Uses the same backend search does: the Platform API when
+  # the version is licensed, otherwise the offline KJV database. Each
+  # unique prefix is only looked up once (cheap debounced calls).
+  local ver="$1" pref="$2"
+  local saved_version api_id n db
+  _SUG_TERMS=()
+  _SUG_INFO=""
+  [[ -n "$pref" ]] || return 0
+  saved_version="${version:-}"
+  version="$ver"
+  version_case
+  version="$saved_version"
+  if api_id=$(_yvp_bible_id "$num" "$lang" "$ver" 2>/dev/null) && [[ -n "$api_id" ]] \
+     && _yvp_search "$api_id" "$pref" 5 >/dev/null 2>&1; then
+    if [[ -n "$_YVP_SEARCH_DYM" ]]; then
+      IFS=',' read -r -a _SUG_TERMS <<<"${_YVP_SEARCH_DYM//, /,}"
+      _SUG_INFO="Did you mean: $_YVP_SEARCH_DYM"
+    else
+      n=$(printf '%s' "$_YVP_SEARCH_JSON" | jq '[.verses[]?]|length' 2>/dev/null)
+      n=${n:-0}
+      _SUG_INFO="$n match"
+      [[ "$n" != 1 ]] && _SUG_INFO+="es"
+    fi
+    return 0
+  fi
+  # Offline backend: count matches in the local KJV database (or JSON).
+  db="$(_offline_db "KJV" 2>/dev/null)"
+  if [[ -f "$db" ]]; then
+    n=$(sqlite3 "$db" "SELECT COUNT(*) FROM verses_fts WHERE verses_fts MATCH '$(echo "$pref" | sed "s/'/''/g")'" 2>/dev/null)
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    _SUG_INFO="$n matches (KJV)"
+  fi
+}
+
+_keyword_prompt() {
+  # $1 = version name (so suggestions resolve the right backend).
+  # Interactively reads a search keyword, showing live did-you-mean /
+  # match-count suggestions under the cursor once you pause typing.
+  # Echoes the entered keyword (empty on abort). UI goes to stderr so
+  # the captured stdout stays a bare keyword.
+  local ver="$1" buf="" k="" c="" d=""
+  local sug_i=0 sug_last="" _kp_saved=""
+  # Raw mode: read each keystroke exactly as typed (Enter = CR, no
+  # cooked-mode CR->NL mangling). Restored on every exit path.
+  _kp_saved="$(stty -g </dev/tty 2>/dev/null)" || _kp_saved=""
+  if [[ -n "$_kp_saved" ]]; then
+    stty raw -echo </dev/tty 2>/dev/null
+    trap 'stty "$_kp_saved" </dev/tty 2>/dev/null' RETURN
+  fi
+  printf 'Keywords: ' >&2
+  while :; do
+    # Draw the input line, then the suggestion line below it (if any),
+    # then return the cursor to the end of the input line.
+    printf '\r\033[2KKeywords: %s' "$buf" >&2
+    if (( ${#_SUG_TERMS[@]} > 0 )); then
+      printf '\n\r\033[2K%s  Tab=accept' "${DIM}${_SUG_INFO}${NC}" >&2
+    elif [[ -n "$_SUG_INFO" ]]; then
+      printf '\n\r\033[2K%s' "${DIM}${_SUG_INFO}${NC}" >&2
+    else
+      printf '\n\r\033[2K' >&2
+    fi
+    printf '\033[1A\r' >&2
+    if ! IFS= read -rsN1 -t 0.35 k </dev/tty; then
+      # Pause in typing: refresh the suggestion line once per prefix.
+      if [[ "$buf" == "${sug_last:-}" ]]; then continue; fi
+      sug_last="$buf"
+      _yvp_suggest_live "$ver" "$buf"
+      continue
+    fi
+    case "$k" in
+      $'\n'|$'\r')
+        printf '\r\033[2KKeywords: %s' "$buf" >&2
+        printf '\n\r\033[2K' >&2
+        printf '%s' "$buf"
+        return 0
+        ;;
+      $'\x7f'|$'\b')
+        buf="${buf%?}"
+        sug_last=
+        ;;
+      $'\t')
+        # Accept the first suggestion into the buffer.
+        if (( ${#_SUG_TERMS[@]} > 0 )); then
+          buf="${_SUG_TERMS[0]}"
+          sug_last=
+        fi
+        ;;
+      $'\e')
+        # Arrow keys: Right/Up/Down step through suggestions, Left
+        # ignored; anything else aborts.
+        IFS= read -rsN1 -t 0.1 c </dev/tty || continue
+        if [[ "$c" != "[" ]]; then
+          printf '\n' >&2
+          return 1
+        fi
+        IFS= read -rsN1 -t 0.1 d </dev/tty || continue
+        case "$d" in
+          C|A|B)
+            if (( ${#_SUG_TERMS[@]} > 0 )); then
+              sug_i=$(((sug_i + 1) % ${#_SUG_TERMS[@]}))
+              buf="${_SUG_TERMS[$sug_i]}"
+              sug_last=
+            fi
+            ;;
+          D) : ;;
+          *) : ;;
+        esac
+        ;;
+      $'\x03')
+        printf '\n' >&2
+        return 1
+        ;;
+      *)
+        [[ "$k" == [[:print:]] ]] && { buf+="$k"; sug_last=; }
+        ;;
+    esac
+  done
+}
+
 # --- Reading / searching ----------------------------------------------
 
 _yvp_passage_text() {
@@ -818,6 +943,14 @@ _yvp_search_render() {
   echo ""
   echo "Search results from YouVersion Platform API — \"${_YVP_SEARCH_QUERY:-}\""
   echo ""
+  # A "did you mean" prompt first: when the term looks misspelled the
+  # whole point is to catch the typo before browsing results, so it
+  # leads the page instead of trailing a wall of matches.
+  if [[ -n "$_YVP_SEARCH_DYM" ]]; then
+    echo "Did you mean: $_YVP_SEARCH_DYM"
+  elif [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$_YVP_SEARCH_QUERY" ]]; then
+    echo "Search instead for: $_YVP_SEARCH_RATHER"
+  fi
   divider_line
   for ref in "${refs[@]}"; do
     [[ -z "$ref" ]] && continue
@@ -842,11 +975,6 @@ _yvp_search_render() {
   elif [[ -n "$_YVP_SEARCH_NEXT" ]]; then
     echo "(more results available)"
   fi
-  if [[ -n "$_YVP_SEARCH_DYM" ]]; then
-    echo "Did you mean: $_YVP_SEARCH_DYM"
-  elif [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$_YVP_SEARCH_QUERY" ]]; then
-    echo "Search instead for: $_YVP_SEARCH_RATHER"
-  fi
   divider_line
 }
 
@@ -866,6 +994,10 @@ _yvp_search_loop() {
     }
     _yvp_search_render "$num" "$ver" "$bid"
     picks=(); vals=()
+    # Correction leading: a "did you mean" prompt first so a misspelled
+    # query is fixed before wading through matches.
+    [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$q" ]] && { picks+=("Search instead for: $_YVP_SEARCH_RATHER"); vals+=("DYM|$_YVP_SEARCH_RATHER"); }
+    [[ -n "$_YVP_SEARCH_DYM" ]] && { picks+=("Did you mean: $_YVP_SEARCH_DYM"); vals+=("DYM|$_YVP_SEARCH_DYM"); }
     mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
     for ref in "${refs[@]}"; do
       [[ -z "$ref" ]] && continue
@@ -876,8 +1008,6 @@ _yvp_search_loop() {
       vals+=("OPEN|$ref|$book")
     done
     [[ -n "$_YVP_SEARCH_NEXT" ]] && { picks+=("Next page of results"); vals+=("NEXT"); }
-    [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$q" ]] && { picks+=("Search instead for: $_YVP_SEARCH_RATHER"); vals+=("DYM|$_YVP_SEARCH_RATHER"); }
-    [[ -n "$_YVP_SEARCH_DYM" ]] && { picks+=("Did you mean: $_YVP_SEARCH_DYM"); vals+=("DYM|$_YVP_SEARCH_DYM"); }
     if (( ${#picks[@]} == 0 )); then
       echo "(nothing to open — back to the menu.)"
       return 0
@@ -3866,10 +3996,13 @@ menu_version() {
 
 menu_search() {
   local q v
-  read -rp "Keywords: " q </dev/tty
-  [[ -z "$q" ]] && return
+  # Version first: the keyword prompt shows live suggestions that depend
+  # on which backend (API vs offline KJV) the search will use.
   read -rp "Version [$DEF_VERSION]: " v </dev/tty
-  search "$q" "${v:-$DEF_VERSION}" menu
+  v="${v:-$DEF_VERSION}"
+  q=$(_keyword_prompt "$v")
+  [[ -z "$q" ]] && return
+  search "$q" "$v" menu
   pause
 }
 
