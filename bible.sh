@@ -824,7 +824,7 @@ _keyword_prompt() {
     if (( ${#_SUG_TERMS[@]} > 0 )); then
       printf '\n\r\033[2K%s  Tab=accept' "${DIM}${_SUG_INFO}${NC}" >&2
     elif [[ -n "$_SUG_INFO" ]]; then
-      printf '\n\r\033[2K%s' "${DIM}${_SUG_INFO}${NC}" >&2
+      printf '\n\r\033[2K%s  Enter=search' "${DIM}${_SUG_INFO}${NC}" >&2
     else
       printf '\n\r\033[2K' >&2
     fi
