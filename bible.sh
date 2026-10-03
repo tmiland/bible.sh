@@ -62,8 +62,6 @@ set -u
 #
 #------------------------------------------------------------------------------#
 
-audio_folder="$HOME/Audio/Listen Bible"
-
 
 # ---------------------------------------------------------------
 # module: bible_offline.sh - offline SQLite/JSON storage
@@ -2857,20 +2855,40 @@ args() {
   fi
 }
 
+_yv_chapter_html() {
+  # $1 = version id, $2 = USFM reference (e.g. JHN.3).
+  # Echo the chapter markup from the YouVersion chapter JSON API
+  # (no key, no page scraping) and set $page_h1 to the localized
+  # heading ("Johannes 3"). The JSON spans use different class names
+  # than the site, so normalize them to the __verse/__content names
+  # the parsers below expect; numeric entities (&#248;) are decoded
+  # so accented text comes out as plain UTF-8.
+  local json
+  json=$(curl -s \
+    --compressed \
+    -H 'Accept: application/json' \
+    "https://bible.youversionapi.com/3.1/chapter.json?id=$1&reference=$2") || true
+  page_h1=$(printf '%s' "$json" | jq -r '.response.data.reference.human // empty' 2>/dev/null)
+  printf '%s' "$json" | jq -r '
+    .response.data.content // empty
+    | gsub("class=\"verse v[0-9]+\""; "class=\"verse__verse\"")
+    | gsub("class=\"content\""; "class=\"verse__content\"")
+    | gsub("&#(?<d>[0-9]+);"; "\(.d|tonumber|[.]|implode)")
+  ' 2>/dev/null
+}
+
 get_bible_chapter() {
-  # tmpfile — chapter pages server-render every verse as
+  # tmpfile — the chapter JSON carries every verse as
   # <span data-usfm="BOOK.CH.VERSE">, so one fetch serves single
-  # verses, ranges and (for the coming frontend) whole chapters.
+  # verses, ranges and whole chapters. $3 is kept for call
+  # compatibility but the version is already in $num.
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "jq not installed..."
+    exit 0
+  fi
   tmp=$(mktemp)
   tmp_files+=("$tmp")
-  # Grab chapter and store in tmp file
-  curl -s \
-    --compressed \
-    -H 'Accept: */*' \
-    -H "Cookie: version=$num" \
-    -H 'Pragma: no-cache' \
-    -H 'Cache-Control: no-cache' \
-    "https://www.bible.com/bible/$num/$1.$2.$3" > "$tmp"
+  _yv_chapter_html "$num" "$1.$2" > "$tmp"
   if [[ ! -s "$tmp" ]]; then
     echo "No result."
     echo
@@ -3099,10 +3117,9 @@ bible() {
     chapter_verse="$chapter:$verse"
   fi
 
-  # Localized book name from the page heading ("Jesaja 54").
-  # Fall back to the canonical English name; the requested version
-  # is already canonical, so no page re-parse needed for it.
-  page_h1=$(grep -Po '<h1[^>]*>\K.*?(?=</h1>)' "$tmp" | head -n 1 || true)
+  # Localized book name from the chapter JSON heading ("Jesaja 54",
+  # set by _yv_chapter_html). Fall back to the canonical English
+  # name; the requested version is already canonical.
   if [[ -n "$page_h1" ]]; then
     book="${page_h1% *}"
   else
@@ -3195,41 +3212,58 @@ audio_seek() {
 }
 
 listen() {
-  local num= seek_start= seek_end=
-  listen_mp3_tmp=$(mktemp)
-  tmp_files+=("$listen_mp3_tmp")
+  local num= seek_start= seek_end= audio_json audio_title listen_ref
   args "$@"
   version_case
   book_case
 
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "jq not installed..."
+    exit 0
+  fi
+
+  # Audio metadata from the YouVersion JSON API (no page scraping):
+  # the default recording's 32k mp3 URL plus its title.
+  audio_json=$(curl -s \
+    --compressed \
+    -H 'Accept: application/json' \
+    "https://audio-bible.youversionapi.com/3.1/chapter.json?version_id=$num&reference=$bible_book.$chapter") || true
+
   listen_mp3_url=$(
-    curl --silent https://www.bible.com/audio-bible/"$num"/"$bible_book"."$chapter"."$version" > "$listen_mp3_tmp"
-    grep -Po "https.*?(?=\")" "$listen_mp3_tmp" |
-    grep -i audio-bible-cdn |
-    head -n 1
+    printf '%s' "$audio_json" | jq -r '
+      (.response.data // empty)
+      | if type == "array" then . else empty end
+      | map(select(.download_urls.format_mp3_32k != null))
+      | (map(select(.default == true))[0] // .[0])
+      | .download_urls.format_mp3_32k // empty
+    ' 2>/dev/null
   )
+  [[ "$listen_mp3_url" == //* ]] && listen_mp3_url="https:$listen_mp3_url"
 
   if [ -z "$listen_mp3_url" ]; then
     echo "No audio found for $bible_book_name $chapter $version"
     exit 0
   fi
 
-  listen_mp3_headline=$(
-    grep -Po "headline\":\".*?(?=\")" "$listen_mp3_tmp" |
-    sed "s|headline\":\"||g" |
-    head -n 1
-  )
+  # Localized reference ("Johannes 3") and chapter markup from the
+  # chapter JSON API; one fetch feeds both the headline and the
+  # numbered text below (see _yv_chapter_html).
+  listen_text_tmp=$(mktemp)
+  tmp_files+=("$listen_text_tmp")
+  _yv_chapter_html "$num" "$bible_book.$chapter" > "$listen_text_tmp"
+  listen_ref="${page_h1:-$bible_book_name $chapter}"
 
-  listen_mp3_transcript=$(
-    grep -Po "transcript\":\".*?(?=\")" "$listen_mp3_tmp" |
-    sed "s|transcript\":\"||g" |
-    sed "s|\\\\n|\n|g"
-  )
+  audio_title=$(printf '%s' "$audio_json" | jq -r '
+    (.response.data // empty)
+    | if type == "array" then . else empty end
+    | (map(select(.default == true))[0] // .[0])
+    | .title // empty
+  ' 2>/dev/null)
 
-  listen_mp3_link=$(
-    grep -Po '{"@id":"\K(.*?)","@type":"WebPage"}' "$listen_mp3_tmp" |
-      sed 's|","@type":"WebPage"}||g'
-  )
+  listen_mp3_headline="Audio Bible: Listen to $listen_ref"
+  [[ -n "$audio_title" ]] && listen_mp3_headline+=" — $audio_title"
+
+  listen_mp3_link="https://www.bible.com/audio-bible/$num/$bible_book.$chapter.$version"
 
   listen_mp3_filename=$(
     echo "$listen_mp3_url" |
@@ -3261,45 +3295,18 @@ listen() {
     fi
   fi
 
-  chapter_pad=$(printf '%02d' "$chapter")
-  if ! [ -d "$audio_folder"/"$version"/"$bible_book_name" ]; then
-    mkdir -p "$audio_folder"/"$version"/"$bible_book_name"
-  fi
-  cd "$audio_folder/$version/$bible_book_name"
-  mp3=""
-  for cached in "$audio_folder/$version/$bible_book_name/"*"$bible_book_name""$chapter_pad"_"$version".mp3; do
-    if [ -f "$cached" ]; then
-      mp3="$cached"
-      break
-    fi
-  done
-  if [ -z "$mp3" ]; then
-    tmp_mp3="$audio_folder/$version/$bible_book_name/$listen_mp3_filename"
-    curl -s -o "$tmp_mp3" "$listen_mp3_url"
-    mp3_title=$(ffmpeg -i "$tmp_mp3" 2>&1 | grep -Po "title\K.*" | tr -d ': ')
-    if [ -n "$mp3_title" ]; then
-      mp3="$audio_folder"/"$version"/"$bible_book_name"/"$mp3_title".mp3
-    else
-      mp3="$audio_folder"/"$version"/"$bible_book_name"/"$bible_book_name""$chapter_pad"_"$version".mp3
-    fi
-    if ! [ -f "$mp3" ]; then
-      mv "$tmp_mp3" "$mp3"
-    else
-      rm "$tmp_mp3"
-    fi
-  fi
-  cd - >/dev/null 2>&1
-  "${player[@]}" "$mp3" >/dev/null 2>&1 &
-  rm "$listen_mp3_tmp"
+  # Stream the chapter mp3 straight from the YouVersion CDN — nothing
+  # is written to disk.  Verse seeking above still applies: both
+  # players can seek within the HTTP stream.
+  "${player[@]}" "$listen_mp3_url" >/dev/null 2>&1 &
 
   printf "\n"
   echo -n "$listen_mp3_headline"
   printf "\n"
   printf "\n"
   # Numbered verses via the local database when available; otherwise
-  # via the chapter text page, falling back to the raw transcript
-  # (which has no verse numbers).  When a verse (or range) was given,
-  # only the selected verses are shown.
+  # from the chapter JSON fetched above (see _yv_chapter_html).  When
+  # a verse (or range) was given, only the selected verses are shown.
   local local_usfms vstart vend v vtext
   _hl_chapter_colors "$num" "$bible_book.$chapter"
   local_usfms=$(local_chapter_verses "$bible_book" "$chapter" "$version" 2>/dev/null)
@@ -3314,29 +3321,16 @@ listen() {
     else
       local_chapter_text "$bible_book" "$chapter" "$version"
     fi
-  else
-    listen_text_tmp=$(mktemp)
-    tmp_files+=("$listen_text_tmp")
-    if curl -s \
-      --compressed \
-      -H 'Accept: */*' \
-      -H "Cookie: version=$num" \
-      -H 'Pragma: no-cache' \
-      -H 'Cache-Control: no-cache' \
-      "https://www.bible.com/bible/$num/$bible_book.$chapter.$version" > "$listen_text_tmp" 2>/dev/null \
-      && [[ -n "$(chapter_usfms "$listen_text_tmp" "$bible_book.$chapter")" ]]; then
-      if [[ -n "$verse" ]]; then
-        vstart="${verse%-*}"
-        vend="${verse#*-}"
-        for (( v=vstart; v<=vend; v++ )); do
-          vtext=$(verse_text "$listen_text_tmp" "$bible_book.$chapter.$v")
-          [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
-        done
-      else
-        chapter_text "$listen_text_tmp" "$bible_book.$chapter"
-      fi
+  elif [[ -n "$(chapter_usfms "$listen_text_tmp" "$bible_book.$chapter")" ]]; then
+    if [[ -n "$verse" ]]; then
+      vstart="${verse%-*}"
+      vend="${verse#*-}"
+      for (( v=vstart; v<=vend; v++ )); do
+        vtext=$(verse_text "$listen_text_tmp" "$bible_book.$chapter.$v")
+        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
+      done
     else
-      echo "$listen_mp3_transcript" | fold -w ${width} -s
+      chapter_text "$listen_text_tmp" "$bible_book.$chapter"
     fi
   fi
   printf "\n"

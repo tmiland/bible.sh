@@ -263,7 +263,7 @@ the app picks the chapter matching today's date. **Read** reads it
 
 ```shell
 Read → "A proverb a day"      # shows Proverbs 15
-Listen → "A proverb a day"    # plays Proverbs 15 audio + transcript
+Listen → "A proverb a day"    # plays Proverbs 15 audio + verses
 ```
 
 Reading records it as your reading spot (Continue picks it up); either
