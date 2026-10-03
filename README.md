@@ -29,9 +29,16 @@ run it. No packages, no companion files, no config.
 - **Highlights** — sync your favorites/notes (OAuth)
 - **"Are You Saved?"** — an interactive gospel walkthrough built on the
   Way of the Master method of Ray Comfort (Living Waters)
-- **A proverb a day** — the chapter of Proverbs matching today's date,
-  with a read-or-listen prompt (Proverbs has 31 chapters, one per day)
+- **A proverb a day** — one chapter of Proverbs per day of the month,
+  read in **Read** or listened to in **Listen**
+- **The Lord's prayer** — one keystroke to Matthew 6:9-13 in Read, or its
+  audio in Listen
+- **Reading plans** — add a plan like *Psalm 65*; it continues where you
+  left off whether you read it (Read) or listen to it (Listen), and the
+  index `Continue` resumes the same spot
 - **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
+- **Arrow-key navigation** — `→`/`←` work like `[n]ext`/`[p]rev` in every
+  chapter loop (Read, Listen, plans, Continue), plus the single-letter keys
 - **Self-update** — `bible self-update` (or `-u`) pulls the latest version
   from this repo, syntax-checks it and swaps itself in atomically; a
   silent version check runs on launch and shows updates in the header
@@ -127,6 +134,17 @@ bible -c Isaiah 54 17 $compare_versions
 bible -s "<keywords>"
 ```
 
+Searches the YouVersion Platform API first (for licensed versions):
+a **pickable list of results** showing each verse's text — one search
+request plus at most one passage request per result on the shown page,
+cached for the session, no per-verse fetching on repeat — with
+pagination via the next-page token and "did you mean" / "search
+instead for" hints surfaced. Interactive runs let you pick a match to
+open its chapter or page through the rest; non-interactive ones print
+the page of results. Falls back to the offline KJV database, then the
+bible.com search page, when the API can't run — search tells you when
+it does.
+
 ### 📖 Flexible reference parsing
 
 `-b`, `-c`, `-l` and `-t` parse references flexibly — colon or space,
@@ -219,25 +237,58 @@ when a newer one exists, shows it in the header:
 Update available: v1.2.0 → v1.3.0 — run: bible self-update (or -u)
 ```
 
-To skip that check: `bible --no-update-check`, or set
-`BIBLE_NO_UPDATE_CHECK=1` in your environment.
+The remote version is cached in `~/.cache/bible/self-version` and only
+re-fetched every `SELF_UPDATE_TTL` seconds (default 6 hours — set `0`
+to check at every launch). To skip the check entirely:
+`bible --no-update-check`, or `BIBLE_NO_UPDATE_CHECK=1`.
 
 ---
 
 ## 🗓 A proverb a day
 
 Proverbs has exactly 31 chapters — one for each day of the month — so
-the app picks the chapter matching today's date and asks whether you'd
-like to **read** or **listen**:
+the app picks the chapter matching today's date. **Read** reads it
+(also `bible proverb`); **Listen** plays it:
 
 ```shell
-bible proverb      # or: Read → "A proverb a day"
-# Proverbs 15 — [r]ead or [l]isten?
+Read → "A proverb a day"      # shows Proverbs 15
+Listen → "A proverb a day"    # plays Proverbs 15 audio + transcript
 ```
 
-Reading shows the full chapter and records it as your reading spot
-(Continue picks it up); listening plays the chapter audio and prints
-the transcript.
+Reading records it as your reading spot (Continue picks it up); either
+way you pick up where you left off.
+
+---
+
+## 📘 Reading plans
+
+Make a book your reading plan and the app remembers your spot. Start
+one from **Read → "Add a reading plan"**:
+
+```shell
+Read → "Add a reading plan" → Psalm 65
+Reading plan: Psalm 65 (KJV).
+```
+
+It opens at that chapter and — from then on — **Read** and **Listen**
+are split cleanly:
+
+- Both open with **`Continue reading plan: Psalm 66`** — straight back
+  into your most recent plan, read or listened as appropriate.
+- **Read** shows plans for reading; move on with `[n]ext` / `[p]prev`
+  (or the `→` / `←` arrow keys), stop anywhere.
+- **Listen** mirrors the same list for audio; each chapter plays and
+  offers the same forward/back (then quits).
+- Both keep the plan in step: wherever you quit/leave/go back becomes the
+  continuation, the plan listing shows the current chapter, and the index
+  `Continue: Psalm 66` resumes the same spot either way.
+
+The **Lord's prayer** sits in both lists too — Read shows Matthew 6:9-13,
+Listen plays it. One plan per book; remove any from
+**Read → "Remove a reading plan"**.
+
+Plans live in `~/.cache/bible/plans` (one `name|osis|chapter|version`
+line per book).
 
 ---
 
@@ -245,8 +296,9 @@ the transcript.
 
 Read and search your *licensed* versions through `api.youversion.com`
 — faster, richer search metadata, and the same verses you already get.
-Active only when an app key is configured and the requested version is
-licensed; otherwise everything falls back to the regular scraping paths.
+Active when an app key is configured and the requested version is
+licensed; otherwise everything falls back to the regular scraping
+paths.
 
 ## ⭐ Highlights
 

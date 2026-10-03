@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 ## Unreleased
 
 ### Added
+- **API search rework**: `--search` (`-s`) searches the YouVersion
+  platform **first** (not offline-first) for licensed versions, via
+  `/v1/search-verses`, returning a **pickable list of results that
+  shows the verse text** (verse text is fetched once per reference and
+  cached for the session; requests stay bounded to one search + at most
+  `page_size` passage fetches per shown page). Interactive runs let
+  you open a match's chapter or page through the rest; the API answer
+  is final (its empty no-match state surfaces "did you mean" /
+  "search instead for" hints). Only when the API can't run does search
+  fall back to the offline KJV database, then the bible.com search
+  page — and it says so. The licensed-version list is cached for one
+  day (`_YVP_KEY_CACHE_TTL_MIN`, default 1440), so newly licensed
+  versions appear within a day without remapping (lookup falls back to
+  an abbreviation match).
 - `bible self-update` (`-u`): fetch the latest `bible.sh` from the
   GitHub repo, compare the `VERSION` header, bash syntax-check the
   download and swap it in atomically. Prompts before overwriting
@@ -13,12 +27,32 @@ All notable changes to this project are documented in this file.
   block — override `SELF_UPDATE_URL` to reuse it in other scripts.
 - Launch check: the app silently checks for a newer version on start
   and, when one exists, shows `Update available: vX → vY — run: bible
-  self-update (or -u)` in the home header. Disable with
-  `bible --no-update-check` or `BIBLE_NO_UPDATE_CHECK=1`.
+  self-update (or -u)` in the home header. The remote version is cached
+  in `~/.cache/bible/self-version` and re-fetched at most every
+  `SELF_UPDATE_TTL` seconds (default 21600 / 6 h; `0` = check each
+  launch). Disable with `bible --no-update-check` or
+  `BIBLE_NO_UPDATE_CHECK=1`.
 - **A proverb a day**: Read → "A proverb a day" opens the chapter of
-  Proverbs matching today's date (31 chapters ↔ 31 days) with a
-  `[r]ead or [l]isten?` prompt; reading records the reading spot,
-  listening plays the chapter audio + transcript. Also `bible proverb`.
+  Proverbs matching today's date (31 chapters ↔ 31 days); reading
+  records the reading spot (Continue picks it up). Also `bible proverb`.
+- **The Lord's prayer**: one pick in Read (shows Matthew 6:9-13) or
+  Listen (plays the verse-range audio).
+- **Reading plans**: Read → "Add a reading plan" (e.g. `Psalm 65`)
+  starts a plan at that chapter. Read and Listen are split: **Read**
+  shows plans for reading, **Listen** mirrors the list for audio, and
+  both keep the same position — wherever you quit/leave/go back becomes
+  the continuation, the plan listing shows the current chapter, and the
+  index's `Continue` resumes it either way. One plan per book
+  (`~/.cache/bible/plans`, lines `name|osis|chapter|version`); remove
+  via Read → "Remove a reading plan".
+- **Arrow-key navigation**: `→`/`←` act as `[n]ext`/`[p]rev` in every
+  chapter loop (Continue spot, Read browse, Listen browse, plan read,
+  plan listen).
+- **Continue reading plan**: Read and Listen open with a
+  `Continue reading plan: <name> <ch>` shortcut for the most recently
+  active plan, jumping straight back into reading/listening it.
+- **Index layout**: the home hotkey bar wraps at the terminal width
+  (default 80 columns) so longer labels never mid-word overflow.
 
 ## [1.2.0] - 2026-09-15
 

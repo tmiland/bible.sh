@@ -656,10 +656,31 @@ offline_status() {
 ## App key: https://developers.youversion.com — 48 chars, sent as the
 ## x-yvp-app-key header (not a secret). Rate-limited: 429 + Retry-After.
 
-_YVP_API="https://api.youversion.com/v1"
+_YVP_API="${YVP_API_BASE:-https://api.youversion.com}/v1"
 _YVP_KEY_FILE="$HOME/.credentials/.bible.com_token"
 BIBLE_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}"
 _YVP_KEY_CACHE="$BIBLE_CACHE/bibles"
+# How long the licensed-version list stays fresh before being re-checked
+# against the API (minutes). 1440 = 1 day, so a newly licensed version
+# becomes searchable within a day, no manual remapping needed.
+_YVP_KEY_CACHE_TTL_MIN="${_YVP_KEY_CACHE_TTL_MIN:-1440}"
+# Last /v1/search-verses response (raw JSON) plus parsed metadata for
+# the search pager: _YVP_SEARCH_QUERY (the query it answered),
+# _YVP_SEARCH_NEXT (pagination token, empty = no more results),
+# _YVP_SEARCH_DYM ("did you mean" suggestions), _YVP_SEARCH_RATHER
+# ("search instead for" hint).
+_YVP_SEARCH_JSON=""
+_YVP_SEARCH_QUERY=""
+_YVP_SEARCH_NEXT=""
+_YVP_SEARCH_DYM=""
+_YVP_SEARCH_RATHER=""
+# Verse-text cache keyed by USFM ref: fetched once per reference via
+# /passages, reused across page turns and the interactive picker so a
+# repeated/navigated page does not refetch.
+declare -A _YVP_TEXT_CACHE
+# Live typeahead suggestions (populated by _yvp_suggest_live).
+_SUG_TERMS=()
+_SUG_INFO=""
 
 # --- Key / licensing --------------------------------------------------
 
@@ -709,15 +730,17 @@ code=$(curl -s -m 20 -w '%{http_code}' -D "$hdr" -o "$tmp" -H "x-yvp-app-key: $(
 }
 
 _yvp_bible_id() {
-  # $1 = web version id (version_case num), $2 = lang (en).
+  # $1 = web version id (version_case num), $2 = lang (en),
+  # $3 = version abbreviation (fallback when $1 is empty or unmapped).
   # Echo the Platform API bible id when that version is licensed to
   # the configured key, else non-zero. The API reuses the same
   # canonical ids as bible.com (NIV11=111, AMP=1588, GNV=2163), so
   # this is purely a licensing check against a TTL-cached collection.
-  local num="$1" lang="${2:-en}" cache json id
+  local num="$1" lang="${2:-en}" abbr="${3:-}" cache json
+  local id=""
   _yvp_key >/dev/null 2>&1 || return 1 # no key → caller falls back to scraping
   cache="$_YVP_KEY_CACHE-$lang.json"
-  if [[ -f "$cache" ]] && [[ -n "$(find "$cache" -mmin -20160 2>/dev/null)" ]]; then
+  if [[ -f "$cache" ]] && [[ -n "$(find "$cache" -mmin -${_YVP_KEY_CACHE_TTL_MIN} 2>/dev/null)" ]]; then
     json=$(<"$cache")
   elif json=$(_yvp_api_get "$_YVP_API/bibles?language_ranges[]=$lang&fields[]=id&fields[]=abbreviation&page_size=*"); then
     mkdir -p "$BIBLE_CACHE"
@@ -727,10 +750,140 @@ _yvp_bible_id() {
   else
     return 1
   fi
-  id=$(printf '%s' "$json" | jq -r --arg n "$num" \
-    '[.data[]? | select((.id|tostring)==$n) | .id][0] // empty' 2>/dev/null)
+  if [[ -n "$num" ]]; then
+    id=$(printf '%s' "$json" | jq -r --arg n "$num" \
+      '[.data[]? | select((.id|tostring)==$n) | .id][0] // empty' 2>/dev/null)
+  fi
+  # Fallback: match the version abbreviation case-insensitively so a
+  # newly licensed version works even before version_case maps it.
+  if [[ -z "$id" && -n "$abbr" ]]; then
+    id=$(printf '%s' "$json" | jq -r --arg a "${abbr^^}" \
+      '[.data[]? | select((.abbreviation|ascii_upcase)==$a) | .id][0] // empty' 2>/dev/null)
+  fi
   [[ -n "$id" ]] || return 1
   printf '%s' "$id"
+}
+
+_yvp_suggest_live() {
+  # $1 = version name, $2 = keyword prefix. Fills _SUG_TERMS (array of
+  # suggestion words) and _SUG_INFO (short status line, e.g. "12
+  # matches"). Uses the same backend search does: the Platform API when
+  # the version is licensed, otherwise the offline KJV database. Each
+  # unique prefix is only looked up once (cheap debounced calls).
+  local ver="$1" pref="$2"
+  local saved_version api_id n db
+  _SUG_TERMS=()
+  _SUG_INFO=""
+  [[ -n "$pref" ]] || return 0
+  saved_version="${version:-}"
+  version="$ver"
+  version_case
+  version="$saved_version"
+  if api_id=$(_yvp_bible_id "$num" "$lang" "$ver" 2>/dev/null) && [[ -n "$api_id" ]] \
+     && _yvp_search "$api_id" "$pref" 5 >/dev/null 2>&1; then
+    if [[ -n "$_YVP_SEARCH_DYM" ]]; then
+      IFS=',' read -r -a _SUG_TERMS <<<"${_YVP_SEARCH_DYM//, /,}"
+      _SUG_INFO="Did you mean: $_YVP_SEARCH_DYM"
+    else
+      n=$(printf '%s' "$_YVP_SEARCH_JSON" | jq '[.verses[]?]|length' 2>/dev/null)
+      n=${n:-0}
+      _SUG_INFO="$n match"
+      [[ "$n" != 1 ]] && _SUG_INFO+="es"
+    fi
+    return 0
+  fi
+  # Offline backend: count matches in the local KJV database (or JSON).
+  db="$(_offline_db "KJV" 2>/dev/null)"
+  if [[ -f "$db" ]]; then
+    n=$(sqlite3 "$db" "SELECT COUNT(*) FROM verses_fts WHERE verses_fts MATCH '$(echo "$pref" | sed "s/'/''/g")'" 2>/dev/null)
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    _SUG_INFO="$n matches (KJV)"
+  fi
+}
+
+_keyword_prompt() {
+  # $1 = version name (so suggestions resolve the right backend).
+  # Interactively reads a search keyword, showing live did-you-mean /
+  # match-count suggestions under the cursor once you pause typing.
+  # Echoes the entered keyword (empty on abort). UI goes to stderr so
+  # the captured stdout stays a bare keyword.
+  local ver="$1" buf="" k="" c="" d=""
+  local sug_i=0 sug_last="" _kp_saved=""
+  # Raw mode: read each keystroke exactly as typed (Enter = CR, no
+  # cooked-mode CR->NL mangling). Restored on every exit path.
+  _kp_saved="$(stty -g </dev/tty 2>/dev/null)" || _kp_saved=""
+  if [[ -n "$_kp_saved" ]]; then
+    stty raw -echo </dev/tty 2>/dev/null
+    trap 'stty "$_kp_saved" </dev/tty 2>/dev/null' RETURN
+  fi
+  printf 'Keywords: ' >&2
+  while :; do
+    # Draw the input line, then the suggestion line below it (if any),
+    # then return the cursor to the end of the input line.
+    printf '\r\033[2KKeywords: %s' "$buf" >&2
+    if (( ${#_SUG_TERMS[@]} > 0 )); then
+      printf '\n\r\033[2K%s  Tab=accept' "${DIM}${_SUG_INFO}${NC}" >&2
+    elif [[ -n "$_SUG_INFO" ]]; then
+      printf '\n\r\033[2K%s  Enter=search' "${DIM}${_SUG_INFO}${NC}" >&2
+    else
+      printf '\n\r\033[2K' >&2
+    fi
+    printf '\033[1A\r' >&2
+    if ! IFS= read -rsN1 -t 0.35 k </dev/tty; then
+      # Pause in typing: refresh the suggestion line once per prefix.
+      if [[ "$buf" == "${sug_last:-}" ]]; then continue; fi
+      sug_last="$buf"
+      _yvp_suggest_live "$ver" "$buf"
+      continue
+    fi
+    case "$k" in
+      $'\n'|$'\r')
+        printf '\r\033[2KKeywords: %s' "$buf" >&2
+        printf '\n\r\033[2K' >&2
+        printf '%s' "$buf"
+        return 0
+        ;;
+      $'\x7f'|$'\b')
+        buf="${buf%?}"
+        sug_last=
+        ;;
+      $'\t')
+        # Accept the first suggestion into the buffer.
+        if (( ${#_SUG_TERMS[@]} > 0 )); then
+          buf="${_SUG_TERMS[0]}"
+          sug_last=
+        fi
+        ;;
+      $'\e')
+        # Arrow keys: Right/Up/Down step through suggestions, Left
+        # ignored; anything else aborts.
+        IFS= read -rsN1 -t 0.1 c </dev/tty || continue
+        if [[ "$c" != "[" ]]; then
+          printf '\n' >&2
+          return 1
+        fi
+        IFS= read -rsN1 -t 0.1 d </dev/tty || continue
+        case "$d" in
+          C|A|B)
+            if (( ${#_SUG_TERMS[@]} > 0 )); then
+              sug_i=$(((sug_i + 1) % ${#_SUG_TERMS[@]}))
+              buf="${_SUG_TERMS[$sug_i]}"
+              sug_last=
+            fi
+            ;;
+          D) : ;;
+          *) : ;;
+        esac
+        ;;
+      $'\x03')
+        printf '\n' >&2
+        return 1
+        ;;
+      *)
+        [[ "$k" == [[:print:]] ]] && { buf+="$k"; sug_last=; }
+        ;;
+    esac
+  done
 }
 
 # --- Reading / searching ----------------------------------------------
@@ -746,13 +899,156 @@ _yvp_passage_text() {
 }
 
 _yvp_search() {
-  # $1 = platform bible id, $2 = query, $3 = max results.
-  # Echo one USFM reference per line for matching verses.
-  local bid="$1" query="$2" total="${3:-5}" body
-  body=$(_yvp_api_get "$_YVP_API/search-verses" \
-    -G --data-urlencode "query=$query" --data-urlencode "bible_id=$bid" \
-    --data-urlencode "page_size=$total") || return 1
-  printf '%s' "$body" | jq -r '.verses[]?.reference' 2>/dev/null
+  # $1 = platform bible id, $2 = query, $3 = results per page (default
+  # 20), $4 = next_page_token (optional). Echoes one USFM reference per
+  # line for the matching verses and sets the _YVP_SEARCH_* globals
+  # (raw response, query, pagination token, "did you mean" / "search
+  # instead for" suggestions). Non-zero only when the request fails.
+  local bid="$1" query="$2" total="${3:-20}" token="${4:-}"
+  local url="$_YVP_API/search-verses"
+  _YVP_SEARCH_JSON=""
+  _YVP_SEARCH_QUERY="$query"
+  _YVP_SEARCH_NEXT=""
+  _YVP_SEARCH_DYM=""
+  _YVP_SEARCH_RATHER=""
+  if [[ -n "$token" ]]; then
+    _YVP_SEARCH_JSON=$(_yvp_api_get "$url" \
+      -G --data-urlencode "query=$query" --data-urlencode "bible_id=$bid" \
+      --data-urlencode "page_size=$total" \
+      --data-urlencode "next_page_token=$token") || return 1
+  else
+    _YVP_SEARCH_JSON=$(_yvp_api_get "$url" \
+      -G --data-urlencode "query=$query" --data-urlencode "bible_id=$bid" \
+      --data-urlencode "page_size=$total") || return 1
+  fi
+  _YVP_SEARCH_NEXT=$(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.next_page_token // empty' 2>/dev/null)
+  _YVP_SEARCH_DYM=$(printf '%s' "$_YVP_SEARCH_JSON" | jq -r \
+    '.did_you_mean | if type == "array" then (map(select(. != "")) | join(", ")) else . end // empty' 2>/dev/null)
+  _YVP_SEARCH_RATHER=$(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.search_instead_for // empty' 2>/dev/null)
+  printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null
+}
+
+_yvp_search_render() {
+  # $1 = web version id (for links), $2 = version name,
+  # $3 = platform bible id (for verse text). Print the page of refs
+  # held in _YVP_SEARCH_JSON as cards — each one the verse text (one
+  # /passages request the first time, then cached) with the reference
+  # as its caption, plus any no-match / suggestion hints. Requests stay
+  # bounded to one search request + at most page_size verse fetches per
+  # page shown, and a failed fetch degrades to the ref + link only.
+  local num="$1" ver="$2" bid="${3:-}"
+  local -a refs
+  local ref book cv text n=0
+  mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
+  echo ""
+  echo "Search results from YouVersion Platform API — \"${_YVP_SEARCH_QUERY:-}\""
+  echo ""
+  # A "did you mean" prompt first: when the term looks misspelled the
+  # whole point is to catch the typo before browsing results, so it
+  # leads the page instead of trailing a wall of matches.
+  if [[ -n "$_YVP_SEARCH_DYM" ]]; then
+    echo "Did you mean: $_YVP_SEARCH_DYM"
+  elif [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$_YVP_SEARCH_QUERY" ]]; then
+    echo "Search instead for: $_YVP_SEARCH_RATHER"
+  fi
+  divider_line
+  for ref in "${refs[@]}"; do
+    [[ -z "$ref" ]] && continue
+    n=$((n + 1))
+    text="${_YVP_TEXT_CACHE[$ref]:-}"
+    if [[ -z "$text" && -n "$bid" ]]; then
+      text=$(_yvp_passage_text "$bid" "$ref" 2>/dev/null) || text=""
+      [[ -n "$text" ]] && _YVP_TEXT_CACHE[$ref]="$text"
+    fi
+    book=$(_yvp_book_name "${ref%%.*}")
+    cv="${ref#*.}"
+    cv="${cv%%.*}:${cv##*.}"
+    if [[ -n "$text" ]]; then
+      printf "${BQUOTE}%s${EQUOTE}\n" "$(printf '%s' "$text" | fold -w "${width}" -s)"
+    fi
+    printf "${BOLD}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$book" "$cv" "$ver"
+    printf "${BLUE}https://www.bible.com/bible/%s/%s.%s${NC}\n" "$num" "$ref" "$ver"
+    echo ""
+  done
+  if (( n == 0 )); then
+    echo "No matches in $ver."
+  elif [[ -n "$_YVP_SEARCH_NEXT" ]]; then
+    echo "(more results available)"
+  fi
+  divider_line
+}
+
+_yvp_search_loop() {
+  # $1 = platform bible id, $2 = query, $3 = version name, $4 = web
+  # version id. Interactive API search pager: page through results with
+  # one request at a time, open a match by number, follow a "did you
+  # mean" suggestion, or go back.
+  local bid="$1" q="$2" ver="$3" num="$4"
+  local token="" page=20
+  local -a refs picks vals
+  local i ref book cv choice
+  while :; do
+    _yvp_search "$bid" "$q" "$page" "$token" >/dev/null || {
+      echo "The search service isn't answering (rate limit or offline). Try again shortly." >&2
+      return 1
+    }
+    _yvp_search_render "$num" "$ver" "$bid"
+    picks=(); vals=()
+    # Correction leading: a "did you mean" prompt first so a misspelled
+    # query is fixed before wading through matches.
+    [[ -n "$_YVP_SEARCH_RATHER" && "$_YVP_SEARCH_RATHER" != "$q" ]] && { picks+=("Search instead for: $_YVP_SEARCH_RATHER"); vals+=("DYM|$_YVP_SEARCH_RATHER"); }
+    [[ -n "$_YVP_SEARCH_DYM" ]] && { picks+=("Did you mean: $_YVP_SEARCH_DYM"); vals+=("DYM|$_YVP_SEARCH_DYM"); }
+    mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
+    for ref in "${refs[@]}"; do
+      [[ -z "$ref" ]] && continue
+      book=$(_yvp_book_name "${ref%%.*}")
+      cv="${ref#*.}"
+      cv="${cv%%.*}:${cv##*.}"
+      picks+=("$book $cv")
+      vals+=("OPEN|$ref|$book")
+    done
+    [[ -n "$_YVP_SEARCH_NEXT" ]] && { picks+=("Next page of results"); vals+=("NEXT"); }
+    if (( ${#picks[@]} == 0 )); then
+      echo "(nothing to open — back to the menu.)"
+      return 0
+    fi
+    echo ""
+    choice=$(pick_from_list "Open a match (or Back):" "${picks[@]}")
+    [[ -z "$choice" ]] && return 0
+    for i in "${!picks[@]}"; do
+      if [[ "${picks[$i]}" == "$choice" ]]; then
+        choice="${vals[$i]}"
+        break
+      fi
+    done
+    case "$choice" in
+      NEXT)
+        token="$_YVP_SEARCH_NEXT"
+        ;;
+      DYM\|*)
+        q="${choice#DYM|}"
+        token=""
+        ;;
+      OPEN\|*)
+        ref="${choice#OPEN|}"
+        ref="${ref%%|*}"
+        _yvp_search_open "$ref" "$ver" "${choice##*|}"
+        return 0
+        ;;
+      *) return 0 ;;
+    esac
+  done
+}
+
+_yvp_search_open() {
+  # $1 = USFM reference (e.g. "JHN.3.16"), $2 = version name,
+  # $3 = display book name. Opens the chapter containing the matched
+  # verse and saves it as the reading spot.
+  local ref="$1" ver="$2" name="${3:-}"
+  local osis="${ref%%.*}" cv="${ref#*.}"
+  local ch="${cv%%.*}"
+  show_chapter "$osis" "$ch" "$ver" "${name:-$osis}"
+  save_place "$osis|${name:-$osis}|$ch|$ver"
 }
 
 _yvp_book_name() {
@@ -1543,6 +1839,78 @@ version_case() {
       num=2407
       lang=en
       ;;
+    ASV)
+      num=12
+      lang=en
+      ;;
+    CPDV)
+      num=42
+      lang=en
+      ;;
+    NASB1995)
+      num=100
+      lang=en
+      ;;
+    NIrV)
+      num=110
+      lang=en
+      ;;
+    NIV11)
+      num=111
+      lang=en
+      ;;
+    NIVUK11)
+      num=113
+      lang=en
+      ;;
+    TOJB2011)
+      num=130
+      lang=en
+      ;;
+    engWEBUS)
+      num=206
+      lang=en
+      ;;
+    WMBBE)
+      num=1207
+      lang=en
+      ;;
+    WMB)
+      num=1209
+      lang=en
+      ;;
+    TPT)
+      num=1849
+      lang=en
+      ;;
+    FBV)
+      num=1932
+      lang=en
+      ;;
+    EASY)
+      num=2079
+      lang=en
+      ;;
+    PEV)
+      num=2530
+      lang=en
+      ;;
+    LSV)
+      num=2660
+      lang=en
+      ;;
+    NASB2020)
+      num=2692
+      lang=en
+      ;;
+    BSB)
+      num=3034
+      lang=en
+      ;;
+    TCENT)
+      num=3427
+      lang=en
+      ;;
     TR1624) # Elzevir textus receptus 1624
       num=182
       lang=gr
@@ -2177,7 +2545,7 @@ bible() {
   # failure — that path stays byte-for-byte untouched as the default.
   if [[ -z "${BIBLE_ONLINE_ONLY:-}" ]]; then
     local api_id api_usfm api_desc
-    if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
+    if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
       if [[ -n "$verse_range" ]]; then
         api_usfm="$bible_book.$chapter.$verse_range"
       elif [[ "$verse" =~ ^[[:digit:]]+$ ]]; then
@@ -2590,6 +2958,9 @@ search() {
   num=
   query=${1:-}
   version=${2:-}
+  # $3 optional: "menu" forces the interactive picker loop even when
+  # stdin is not a tty (the menu reads keys from /dev/tty, not fd 0).
+  local force_loop="${3:-}"
 
   # Default to KJV when no version was given (mirrors args()).
   if [[ -z "$version" ]]; then
@@ -2601,47 +2972,44 @@ search() {
     num=1
   fi
 
-  # Offline-first: search the local database when the requested
+  # API-first search: when an app key is set and the requested version
+  # is licensed to it, search the official Platform API (one request per
+  # page of references). Interactive contexts let you pick a match to
+  # open its chapter or page through the rest; non-interactive ones
+  # print the page. The API answer is final even when it has no matches
+  # (its "did you mean" hints are part of the feature set). Only when
+  # the API cannot run (no key / not licensed / request failed) do we
+  # fall back, first to the local database, then to the bible.com
+  # scraping search.
+  local api_id rc api_notice=""
+  if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
+    if [[ -t 0 || -n "$force_loop" ]]; then
+      _yvp_search_loop "$api_id" "$query" "$version" "$num"
+      rc=$?
+      # 0 = user picked/backed out (finished); anything else = the API
+      # request failed → fall through to local.
+      (( rc == 0 )) && return 0
+    elif _yvp_search "$api_id" "$query" >/dev/null 2>&1; then
+      _yvp_search_render "$num" "$version" "$api_id"
+      return 0
+    fi
+    api_notice="YouVersion API search didn't answer (offline now, or rate-limited). Showing local/online results instead:"
+  elif [[ -z "$(_yvp_key 2>/dev/null)" ]]; then
+    # No app key configured: the API leg never runs, so skip the
+    # error noise and let the regular fallbacks take over.
+    api_notice=""
+  else
+    api_notice="YouVersion API search isn't licensed for \"$version\" (or no cached license). Showing local/online results instead:"
+  fi
+
+  [[ -n "$api_notice" ]] && echo "${DIM}$api_notice${NC}"
+
+  # Offline fallback: search the local database when the requested
   # version is installed locally.
   if [[ "$version" == "KJV" ]] && _offline_is_installed "KJV"; then
     if local_search "$query" "$version"; then
       return 0
     fi
-  fi
-
-  # API-first search: when an app key is set and the requested
-  # version is licensed to it, search the official Platform API and
-  # render each matched reference. Falls back to the bible.com
-  # scraping search below on any failure.
-  local api_id api_ref api_desc api_book api_cv api_link
-  if api_id=$(_yvp_bible_id "$num" "$lang" 2>/dev/null) && [[ -n "$api_id" ]]; then
-    echo ""
-    echo "Search results from YouVersion Platform API"
-    echo ""
-    divider_line
-    while IFS= read -r api_ref; do
-      [[ -z "$api_ref" ]] && continue
-      api_desc=$(_yvp_passage_text "$api_id" "$api_ref" 2>/dev/null)
-      [[ -n "$api_desc" ]] || continue
-      api_book=$(_yvp_book_name "${api_ref%%.*}")
-      api_cv="${api_ref#*.}"
-      api_cv="${api_cv%%.*}:${api_cv##*.}"
-      api_link="https://www.bible.com/bible/$num/$api_ref.$version"
-      description="$api_desc"
-      book="$api_book"
-      chapter_verse="$api_cv"
-      version="$version"
-      link="$api_link"
-      if [[ $description =~ $BQUOTE ]] || [[ $description =~ $EQUOTE ]]; then
-        BQUOTE=''
-        EQUOTE=''
-      fi
-      output_correction
-      output "$description" "$book" "$chapter_verse" "$version" "$link"
-      divider_line
-      sleep 0.1
-    done < <(_yvp_search "$api_id" "$query" 3)
-    return 0
   fi
 
   get_url_id=$(
@@ -2826,6 +3194,11 @@ usage() {
   --help      | -h     Show this help text.
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
+                       Search the YouVersion Platform API first
+                       (licensed versions): a pickable list of results
+                       with the verse text shown, pagination and "did
+                       you mean" suggestions. Falls back to the offline
+                       KJV database, then the bible.com search page.
   --votd      | -v     bible -v
   proverb              bible proverb
                        The chapter of Proverbs matching today's date
@@ -2945,24 +3318,38 @@ self_update() {
 }
 
 self_update_check() {
-  # Launch-time update check. Non-destructive: only sets _SU_LOCAL and
-  # _SU_AVAILABLE (remote version when it is newer). Skips itself when
-  # BIBLE_NO_UPDATE_CHECK=1. Bounded timeouts so an offline box never
-  # stalls the app for long.
-  local url tmp rver
+  # Launch-time update check with a TTL cache: the remote version is
+  # re-fetched at most every $SELF_UPDATE_TTL seconds (default 6h), so a
+  # fresh cache avoids downloading the whole script on every launch.
+  # Non-destructive: only sets _SU_LOCAL and _SU_AVAILABLE (remote
+  # version when it is newer). Skips itself when BIBLE_NO_UPDATE_CHECK=1.
+  # Bounded timeouts so an offline box never stalls the app for long.
+  local url tmp rver cache age ttl
   _SU_AVAILABLE=""
   _SU_LOCAL=""
   [[ "${BIBLE_NO_UPDATE_CHECK:-0}" == "1" ]] && return 0
   _SU_LOCAL="$(_su_version "${BASH_SOURCE[0]}")"
   url="${SELF_UPDATE_URL:-$_SELF_UPDATE_URL}"
-  tmp="$(mktemp "${TMPDIR:-/tmp}/self-check.XXXXXX")"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --connect-timeout 3 --max-time 6 "$url" -o "$tmp" 2>/dev/null
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q -T 3 "$url" -O "$tmp" 2>/dev/null
+  ttl="${SELF_UPDATE_TTL:-21600}"
+  cache="$BIBLE_CACHE/self-version"
+  rver=""
+  if [[ -f "$cache" ]]; then
+    read -r rver < "$cache"
+    age=$(( $(date +%s) - $(stat -c %Y "$cache" 2>/dev/null || echo 0) ))
+    (( age >= 0 && age < ttl )) || rver=""
   fi
-  rver="$(_su_version "$tmp" 2>/dev/null)"
-  rm -f "$tmp"
+  if [[ -z "$rver" ]]; then
+    mkdir -p "$BIBLE_CACHE"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/self-check.XXXXXX")"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --connect-timeout 3 --max-time 6 "$url" -o "$tmp" 2>/dev/null
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -T 3 "$url" -O "$tmp" 2>/dev/null
+    fi
+    rver="$(_su_version "$tmp" 2>/dev/null)"
+    rm -f "$tmp"
+    [[ -n "$rver" ]] && printf '%s\n' "$rver" > "$cache"
+  fi
   [[ -n "$_SU_LOCAL" && -n "$rver" ]] || return 0
   [[ "$_SU_LOCAL" != "$rver" ]] || return 0
   [[ "$(printf '%s\n%s\n' "$_SU_LOCAL" "$rver" | sort -V | tail -1)" == "$rver" ]] \
@@ -3100,6 +3487,17 @@ book_chapters() {
   done
 }
 
+osis_name() {
+  # $1 = OSIS → display name (e.g. PSA → Psalm), empty if unknown.
+  local e
+  for e in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    if [[ "$(cut -d'|' -f1 <<<"$e")" == "$1" ]]; then
+      cut -d'|' -f2 <<<"$e"
+      return
+    fi
+  done
+}
+
 continue_label() {
   local osis name ch ver
   [[ -f "$BIBLE_LAST" ]] || return
@@ -3118,7 +3516,8 @@ continue_place() {
   while true; do
     show_chapter "$osis" "$ch" "$ver" "$name"
     save_place "$osis|$name|$ch|$ver"
-    read -rp "[n]ext [p]rev [f]av [q]uit: " nav </dev/tty
+    plan_sync "$osis" "$ch" "$ver"
+    nav=$(read_key "[n]ext [p]rev [f]av [q]uit: ")
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
@@ -3142,6 +3541,26 @@ if [[ -z "${NO_FZF:-}" && -n $(command -v 'fzf') ]]; then
 fi
 
 # --- Helpers ---------------------------------------------------------
+# One-keypress navigation: letters as-is (lowercased); Right arrow → n,
+# Left arrow → p. $1 = optional prompt (printed to stderr, like read -p).
+read_key() {
+  local k c d
+  [[ -n "$1" ]] && printf '%s' "$1" >&2
+  IFS= read -rsn1 k </dev/tty
+  if [[ "$k" == $'\x1b' ]]; then
+    if IFS= read -rsn1 -t 0.2 c </dev/tty && [[ "$c" == "[" ]]; then
+      if IFS= read -rsn1 -t 0.2 d </dev/tty; then
+        case "$d" in
+          C) k=n ;;  # Right → next
+          D) k=p ;;  # Left → prev
+          A|B) k="" ;;
+        esac
+      fi
+    fi
+  fi
+  printf '%s' "${k,,}"
+}
+
 pause() {
   read -rp "Press Enter to continue..." _ </dev/tty
 }
@@ -3219,7 +3638,7 @@ browse_books() {
       bible "$name" "$ch:$ref" "$ver"
     fi
     save_place "$osis|$name|$ch|$ver"
-    read -rp "[n]ext [p]rev [v]erse [c]hapter [f]av [q]uit: " nav </dev/tty
+    nav=$(read_key "[n]ext [p]rev [v]erse [c]hapter [f]av [q]uit: ")
     case "$nav" in
       n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
@@ -3230,6 +3649,58 @@ browse_books() {
     esac
   done
 }
+# Audio-browse a Testament: pick book → chapter (optional verse), play
+# the audio, then [n]ext / [p]rev / [c]hapter. Wherever you stop becomes
+# the reading spot too (Continue + plans pick up the same place).
+listen_browse() {
+  # $1 = array name holding OSIS|Name|Chapters entries, $2 = version.
+  local -n _books=$1
+  local ver="$2" entry osis name maxch ch ref nav
+  local -a names
+  names=()
+  for entry in "${_books[@]}"; do
+    names+=("$(cut -d'|' -f2 <<<"$entry")")
+  done
+  entry=$(pick_from_list "Books:" "${names[@]}")
+  [[ -z "$entry" ]] && return
+  for e in "${_books[@]}"; do
+    if [[ "$(cut -d'|' -f2 <<<"$e")" == "$entry" ]]; then
+      entry="$e"
+      break
+    fi
+  done
+  osis="$(cut -d'|' -f1 <<<"$entry")"
+  name="$(cut -d'|' -f2 <<<"$entry")"
+  maxch="$(cut -d'|' -f3 <<<"$entry")"
+  ch=""
+  while true; do
+    if [[ -z "$ch" ]]; then
+      read -rp "$name has $maxch chapters. Chapter (1-$maxch, 0=back): " ch </dev/tty
+      [[ "$ch" == "0" ]] && return
+      if ! [[ "$ch" =~ ^[0-9]+$ ]] || ((ch < 1 || ch > maxch)); then
+        echo "Enter a chapter between 1 and $maxch."
+        ch=""
+        continue
+      fi
+      read -rp "Verse (empty = whole chapter): " ref </dev/tty
+    fi
+    if [[ -z "$ref" ]]; then
+      listen "$name" "$ch" "$ver"
+    else
+      listen "$name" "$ch:$ref" "$ver"
+    fi
+    save_place "$osis|$name|$ch|$ver"
+    nav=$(read_key "[n]ext [p]rev [v]erse [c]hapter [q]uit: ")
+    case "$nav" in
+      n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
+      v|V) read -rp "Verse (empty = whole chapter): " ref </dev/tty ;;
+      c|C) ch="" ;;
+      *) return ;;
+    esac
+  done
+}
+
 show_chapter() {
   # $1=OSIS $2=chapter $3=version $4=display name (optional)
   local osis="$1" ch="$2" ver="$3" dname="${4:-$1}"
@@ -3294,38 +3765,203 @@ menu_favorites() {
   done < "$BIBLE_CACHE/favorites"
 }
 
+# --- Reading plans ----------------------------------------------------
+# A plan is a line in $BIBLE_CACHE/plans:  name|osis|chapter|version
+# (one per book; adding again with the same book moves its position).
+# Progress follows wherever you stop: quit/leave/back in the plan loop,
+# and cross-reading from the Continue spot on the index keeps in sync.
+
+plan_file="$BIBLE_CACHE/plans"
+
+plan_sync() {
+  # $1=osis $2=chapter $3=version — fold the given position into the
+  # plan file if a plan exists for that book (no-op otherwise).
+  local osis="$1" ch="$2" ver="$3" p name
+  p="$plan_file"
+  [[ -f "$p" ]] || return 0
+  if grep -q "^[^|]*|$osis|" "$p"; then
+    name=$(osis_name "$osis")
+    grep -v "^[^|]*|$osis|" "$p" > "$p.tmp"
+    printf '%s|%s|%s|%s\n' "$name" "$osis" "$ch" "$ver" >> "$p.tmp"
+    mv "$p.tmp" "$p"
+  fi
+}
+
+plan_save_chapter() {
+  # $1=osis $2=chapter $3=version — create or move a book's plan.
+  local osis="$1" ch="$2" ver="$3" p name
+  p="$plan_file"
+  mkdir -p "$BIBLE_CACHE"
+  name=$(osis_name "$osis")
+  if grep -q "^[^|]*|$osis|" "$p" 2>/dev/null; then
+    grep -v "^[^|]*|$osis|" "$p" > "$p.tmp"
+    printf '%s|%s|%s|%s\n' "$name" "$osis" "$ch" "$ver" >> "$p.tmp"
+    mv "$p.tmp" "$p"
+  else
+    printf '%s|%s|%s|%s\n' "$name" "$osis" "$ch" "$ver" >> "$p"
+  fi
+}
+
+plan_read() {
+  # $1 = "name|osis|chapter|version" (as stored). Read from that chapter;
+  # wherever you quit becomes both the plan's position and the index
+  # Continue spot.
+  local line name osis ch ver maxch nav
+  line="$1"
+  IFS='|' read -r name osis ch ver <<< "$line"
+  ver="${ver:-$DEF_VERSION}"
+  maxch=$(book_chapters "$osis")
+  while true; do
+    show_chapter "$osis" "$ch" "$ver" "$name"
+    save_place "$osis|$name|$ch|$ver"
+    plan_sync "$osis" "$ch" "$ver"
+    nav=$(read_key "[n]ext [p]rev [f]av [q]uit: ")
+    case "$nav" in
+      n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      f|F) toggle_fav "$osis|$name|$ch|$ver" ;;
+      *) return ;;
+    esac
+  done
+}
+
+plan_add() {
+  local ref ch maxch ver
+  read -rp "Reading plan start (e.g. Psalm 65, or 2 Timothy 3): " ref </dev/tty
+  [[ -z "$ref" ]] && return 1
+  # Reuse the app's reference parser: sets book/chapter/verse/version.
+  # shellcheck disable=SC2086
+  args $ref
+  book_case
+  [[ -n "${bible_book:-}" ]] || { echo "Could not resolve book '$book'."; pause; return 1; }
+  ch="${chapter:-1}"
+  maxch=$(book_chapters "$bible_book")
+  if [[ -z "$maxch" ]] || ! [[ "$ch" =~ ^[0-9]+$ ]] || ((ch < 1 || ch > maxch)); then
+    echo "${bible_book_name:-$bible_book} has chapters 1-$maxch."
+    return 1
+  fi
+  ver="${version:-$DEF_VERSION}"
+  plan_save_chapter "$bible_book" "$ch" "$ver"
+  printf 'Reading plan: %s %s (%s).\n' "$(osis_name "$bible_book")" "$ch" "$ver"
+  plan_read "$(osis_name "$bible_book")|$bible_book|$ch|$ver"
+}
+
+plan_listen() {
+  # Listen through the plan: plays the current chapter's audio, then
+  # [n]ext / [p]rev / [q]uit. Wherever you stop becomes the plan's
+  # position and the index Continue spot.
+  local line name osis ch ver maxch nav
+  line="$1"
+  IFS='|' read -r name osis ch ver <<< "$line"
+  ver="${ver:-$DEF_VERSION}"
+  maxch=$(book_chapters "$osis")
+  while true; do
+    listen "$name" "$ch" "$ver"
+    save_place "$osis|$name|$ch|$ver"
+    plan_sync "$osis" "$ch" "$ver"
+    nav=$(read_key "[n]ext [p]rev [q]uit: ")
+    case "$nav" in
+      n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
+      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      *) return ;;
+    esac
+  done
+}
+
+plan_remove() {
+  local -a labels lines
+  local line i pick p
+  labels=(); lines=()
+  if [[ -f "$plan_file" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      labels+=("$(cut -d'|' -f1 <<<"$line") $(cut -d'|' -f3 <<<"$line")")
+      lines+=("$line")
+    done < "$plan_file"
+  fi
+  if [[ ${#lines[@]} -eq 0 ]]; then
+    echo "No reading plans yet."
+    pause
+    return
+  fi
+  pick=$(pick_from_list "Remove reading plan:" "${labels[@]}")
+  [[ -z "$pick" ]] && return
+  for i in "${!labels[@]}"; do
+    if [[ "${labels[$i]}" == "$pick" ]]; then
+      p="$plan_file"
+      grep -vxF "${lines[$i]}" "$p" > "$p.tmp" || true
+      mv -f "$p.tmp" "$p"
+      echo "Removed reading plan: $pick"
+      return
+    fi
+  done
+}
+
 menu_read() {
-  local choice day
+  local choice day pl pn po pc pv
+  local -a labels lines picks
+  local line i name osis ch ver
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
-  choice=$(pick_from_list "Read:" \
-    "A proverb a day (Proverbs $day)" \
+  labels=(); lines=(); picks=()
+  if [[ -f "$plan_file" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      IFS='|' read -r name osis ch ver <<< "$line"
+      labels+=("$name $ch")
+      lines+=("$line")
+    done < "$plan_file"
+  fi
+  # The reading plan starts where you last read: a "Continue reading
+  # plan" shortcut for the most recently active plan (last line).
+  pl=""
+  if [[ -s "$plan_file" ]]; then
+    pl="$(tail -1 "$plan_file")"
+    [[ -n "$pl" ]] && IFS='|' read -r pn po pc pv <<< "$pl"
+  fi
+  if [[ -n "$pl" ]]; then
+    picks+=("Continue reading plan: $pn $pc")
+  fi
+  picks+=("A proverb a day (Proverbs $day)" \
+    "The Lord's prayer (Matthew 6:9-13)" \
+    "${labels[@]}" \
+    "Add a reading plan" "Remove a reading plan" \
     "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
+  choice=$(pick_from_list "Read:" "${picks[@]}")
   case "$choice" in
+    "Continue reading plan: $pn $pc") plan_read "$pl" ;;
     "A proverb a day (Proverbs $day)") menu_proverb ;;
+    "The Lord's prayer (Matthew 6:9-13)")
+      bible "Matthew" "6:9-13" "$DEF_VERSION"
+      pause
+      ;;
+    "Add a reading plan") plan_add ;;
+    "Remove a reading plan") plan_remove ;;
     "Old Testament") browse_books _OT "$DEF_VERSION" ;;
     "New Testament") browse_books _NT "$DEF_VERSION" ;;
     "Apocrypha (KJVAAE)") browse_books _APO KJVAAE ;;
+    *)
+      for i in "${!labels[@]}"; do
+        if [[ "${labels[$i]}" == "$choice" ]]; then
+          plan_read "${lines[$i]}"
+          return
+        fi
+      done
+      ;;
   esac
 }
 
 menu_proverb() {
-  # "A proverb a day": the chapter of Proverbs matching today's date —
-  # Proverbs has exactly 31 chapters, one per day of the month.
-  local day sel osis="PRO"
+  # "A proverb a day": read the chapter of Proverbs matching today's
+  # date — Proverbs has exactly 31 chapters, one per day of the month.
+  # Audio lives in the Listen section ("A proverb a day" there).
+  local day osis="PRO"
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
   if ! [[ "$day" =~ ^[0-9]+$ ]] || ((day < 1 || day > 31)); then
     echo "Could not match today's date to a chapter of Proverbs."
     pause
     return
   fi
-  read -rsn1 -p "Proverbs $day — [r]ead or [l]isten? " sel </dev/tty
-  printf '\n'
-  sel="${sel,,}"
-  case "$sel" in
-    r) show_chapter "$osis" "$day" "$DEF_VERSION" "Proverbs" ;;
-    l) listen "Proverbs" "$day" "$DEF_VERSION"; pause ;;
-    *) return ;;
-  esac
+  show_chapter "$osis" "$day" "$DEF_VERSION" "Proverbs"
   save_place "$osis|Proverbs|$day|$DEF_VERSION"
 }
 
@@ -3360,10 +3996,13 @@ menu_version() {
 
 menu_search() {
   local q v
-  read -rp "Keywords: " q </dev/tty
-  [[ -z "$q" ]] && return
+  # Version first: the keyword prompt shows live suggestions that depend
+  # on which backend (API vs offline KJV) the search will use.
   read -rp "Version [$DEF_VERSION]: " v </dev/tty
-  search "$q" "${v:-$DEF_VERSION}"
+  v="${v:-$DEF_VERSION}"
+  q=$(_keyword_prompt "$v")
+  [[ -z "$q" ]] && return
+  search "$q" "$v" menu
   pause
 }
 
@@ -3378,13 +4017,60 @@ menu_compare() {
 }
 
 menu_listen() {
-  local ref v
-  read -rp "Chapter to listen (e.g. Isaiah 54): " ref </dev/tty
-  [[ -z "$ref" ]] && return
-  read -rp "Version [$DEF_VERSION]: " v </dev/tty
-  # shellcheck disable=SC2086
-  listen $ref ${v:-$DEF_VERSION}
-  pause
+  # The audio mirror of the Read section: proverb, reading plans, and
+  # the whole Bible browsed by book. Wherever you stop becomes the
+  # reading spot too, so Read and Listen pick up the same place.
+  local choice day pl pn po pc pv
+  local -a labels lines picks
+  local line i name osis ch ver
+  day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
+  labels=(); lines=(); picks=()
+  if [[ -f "$plan_file" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      IFS='|' read -r name osis ch ver <<< "$line"
+      labels+=("$name $ch")
+      lines+=("$line")
+    done < "$plan_file"
+  fi
+  # The reading plan starts where you last listened: a "Continue
+  # reading plan" shortcut for the most recently active plan.
+  pl=""
+  if [[ -s "$plan_file" ]]; then
+    pl="$(tail -1 "$plan_file")"
+    [[ -n "$pl" ]] && IFS='|' read -r pn po pc pv <<< "$pl"
+  fi
+  if [[ -n "$pl" ]]; then
+    picks+=("Continue reading plan: $pn $pc")
+  fi
+  picks+=("A proverb a day (Proverbs $day)" \
+    "The Lord's prayer (Matthew 6:9-13)" \
+    "${labels[@]}" \
+    "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
+  choice=$(pick_from_list "Listen:" "${picks[@]}")
+  case "$choice" in
+    "Continue reading plan: $pn $pc") plan_listen "$pl" ;;
+    "A proverb a day (Proverbs $day)")
+      listen "Proverbs" "$day" "$DEF_VERSION"
+      save_place "PRO|Proverbs|$day|$DEF_VERSION"
+      pause
+      ;;
+    "The Lord's prayer (Matthew 6:9-13)")
+      listen "Matthew" "6:9-13" "$DEF_VERSION"
+      pause
+      ;;
+    "Old Testament") listen_browse _OT "$DEF_VERSION" ;;
+    "New Testament") listen_browse _NT "$DEF_VERSION" ;;
+    "Apocrypha (KJVAAE)") listen_browse _APO KJVAAE ;;
+    *)
+      for i in "${!labels[@]}"; do
+        if [[ "${labels[$i]}" == "$choice" ]]; then
+          plan_listen "${lines[$i]}"
+          return
+        fi
+      done
+      ;;
+  esac
 }
 
 pick_target() {
@@ -3500,10 +4186,29 @@ main_menu() {
     keys+=(a r f s m l v t e o h)
     actions+=(menu_saved menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
     labels+=("Are you saved?" "Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
+    # One compact bar: single keypress, no scrolling. Items wrap at the
+    # terminal width (default 80) so long labels never mid-word overflow.
+    local w _lab _plain _used
+    w="${COLUMNS:-}"
+    [[ "$w" =~ ^[0-9]+$ ]] && ((w > 40)) || w="$(tput cols 2>/dev/null || echo 80)"
+    [[ "$w" =~ ^[0-9]+$ ]] && ((w > 40)) || w=80
+    _used=0
     for i in "${!labels[@]}"; do
-      printf '%s  ' "$(hotkey_label "${keys[$i]}" "${labels[$i]}")" >&2
+      _lab="$(hotkey_label "${keys[$i]}" "${labels[$i]}")"
+      _plain="$(printf '%s' "$_lab" | sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g')"
+      if (( _used > 0 && _used + ${#_plain} + 2 > w )); then
+        printf '\n  ' >&2
+        _used=2
+      fi
+      printf '%s  ' "$_lab" >&2
+      _used=$((_used + ${#_plain} + 2))
     done
-    printf '%s\n' "$(hotkey_label q Quit)" >&2
+    _lab="$(hotkey_label q Quit)"
+    _plain="$(printf '%s' "$_lab" | sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g')"
+    if (( _used > 0 && _used + ${#_plain} + 2 > w )); then
+      printf '\n  ' >&2
+    fi
+    printf '%s\n' "$_lab" >&2
     printf '› ' >&2
     IFS= read -rsn1 key </dev/tty
     printf '\n' >&2
