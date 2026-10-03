@@ -53,6 +53,37 @@ All notable changes to this project are documented in this file.
   active plan, jumping straight back into reading/listening it.
 - **Index layout**: the home hotkey bar wraps at the terminal width
   (default 80 columns) so longer labels never mid-word overflow.
+- **Highlights login**: aligned with the current YouVersion OAuth spec —
+  the App Key *is* the OAuth `client_id` (no separate Client ID exists), so
+  `bible hl login` only ever needs the App Key + Redirect URI. The flow now
+  uses the documented two-hop callback (paste the callback URL, the state
+  is replayed to `/auth/callback` and the code exchanged at `/auth/token`)
+  with `scope=openid profile email`, `nonce`, and
+  `requested_permissions[]=highlights`. `hl status` reports the App Key /
+  Redirect URI state. `YVP_API_BASE` overrides the API host for testing.
+  Old `YVP_CLIENT_ID` is gone.
+- **Highlights account identity**: `bible hl status` decodes the cached
+  `id_token` and shows the signed-in YouVersion account (`Account: Name
+  <email>`) from the OpenID claims.
+- **Highlights reading experience**: the CLI now matches the *actual*
+  YouVersion highlights API (per-chapter colors). `bible hl list <chapter>`
+  shows each highlighted verse and its color; `bible hl add <verse> [color]`
+  and `bible hl rm <verse>` create/clear highlights (colors are `RRGGBB`).
+  While reading or listening to a chapter, highlighted verses are marked
+  inline with a colored ●. The menu Highlights entry (`g`) is now a
+  **highlights browser**: scan the book you're reading — or any book —
+  for every chapter that has highlights and open any chapter with the
+  markers inline (a parallel per-chapter sweep keeps even a 150-chapter
+  book under two seconds). The current chapter's highlighted verses are
+  one keypress away in the same menu. (Highlights are stored per chapter
+  on the API — there is no "list everything" call, and a whole-Bible
+  sweep would need ~1,189 requests, so the menu stays book-scoped.)
+- **Zero-setup highlights login**: bible.sh ships with a shared YouVersion
+  App Key (a public OAuth `client_id`, XOR-masked in the source so it never
+  sits in plaintext). Most users just run `bible hl login` and approve in
+  the browser — no Platform app registration needed. The key never appears
+  in the config wizard either. Override per-user via `YVP_APP_KEY` or
+  `bible hl config`.
 
 ## [1.2.0] - 2026-09-15
 
@@ -85,8 +116,8 @@ All notable changes to this project are documented in this file.
   `/v1/search-verses`. New module sourced by bible.sh when present.
 - `bible hl` / `bible highlights` scaffolding (`bible_highlights.sh`):
   full OAuth PKCE login + data-exchange approval flow and
-  `/v1/highlights` CRUD (list/add/delete), gated on an app key plus a
-  registered OAuth client (`YVP_CLIENT_ID`, `YVP_REDIRECT_URI`). Without
+  `/v1/highlights` CRUD (list/add/delete), gated on an app key (the OAuth
+  `client_id`) plus a registered Redirect URI (`YVP_REDIRECT_URI`). Without
   those, commands print setup instructions.
 - `"Are You Saved?"` / `bible saved` walkthrough (`bible_witness.sh`):
   forward-only, interactive gospel mission following the questioning

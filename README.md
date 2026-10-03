@@ -2,12 +2,14 @@
 
 # 📖 bible.sh
 
-**The whole Bible app in one shell file.**
+**The Bible, on your terminal. Whole. Offline. Yours.**
 
-Everything — interactive app, CLI, offline KJV, YouVersion API,
-highlights and the *"Are You Saved?"* gospel walkthrough — lives inside
-a single self-contained `bible.sh` executable. Download it, chmod it,
-run it. No packages, no companion files, no config.
+Everything — the interactive Bible app, a lightning-fast CLI, offline
+search, the YouVersion Platform API, your own synced highlights and a
+gospel walkthrough — lives inside **one self-contained bash file**.
+Download it, chmod it, run it. No packages, no companion files, no
+config. From a single verse to whole reading plans, your Bible is one
+command away.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Shell: bash](https://img.shields.io/badge/shell-bash-4EAA25.svg)](bible.sh)
@@ -18,31 +20,40 @@ run it. No packages, no companion files, no config.
 
 ---
 
-## ✨ Highlights
+## ✨ Why you'll love it
 
-- **One file, zero deps** — the entire app is a single ~3400-line bash script
-- **Interactive app frontend** — menus for Read, Search, Compare, Listen,
-  Verse of the Day, Translate, Version picker, Offline and Help
-- **Straight CLI** — `bible -b John 3:16 KJV`, pipe it to your clipboard
-- **Offline KJV** — full searchable local database (SQLite FTS5, no internet)
-- **YouVersion Platform** — licensed read/search via `api.youversion.com`
-- **Highlights** — sync your favorites/notes (OAuth)
-- **"Are You Saved?"** — an interactive gospel walkthrough built on the
-  Way of the Master method of Ray Comfort (Living Waters)
-- **A proverb a day** — one chapter of Proverbs per day of the month,
-  read in **Read** or listened to in **Listen**
-- **The Lord's prayer** — one keystroke to Matthew 6:9-13 in Read, or its
-  audio in Listen
-- **Reading plans** — add a plan like *Psalm 65*; it continues where you
-  left off whether you read it (Read) or listen to it (Listen), and the
-  index `Continue` resumes the same spot
-- **Flexible references** — `2Timoteus 1:2`, `2 Timoteus 1 2`, ranges, no-colon…
-- **Arrow-key navigation** — `→`/`←` work like `[n]ext`/`[p]rev` in every
-  chapter loop (Read, Listen, plans, Continue), plus the single-letter keys
-- **Self-update** — `bible self-update` (or `-u`) pulls the latest version
-  from this repo, syntax-checks it and swaps itself in atomically; a
-  silent version check runs on launch and shows updates in the header
-  (`--no-update-check` / `BIBLE_NO_UPDATE_CHECK=1` to disable)
+- **⚡ One file, zero dependencies** — the entire app is a single bash
+  script. No install, no packages, no bloat. If you have a terminal,
+  you have a Bible.
+- **📖 The whole Bible at your fingertips** — an interactive frontend
+  for Read, Search, Compare, Listen, Verse of the Day, Translate,
+  Version picker, Offline and Help, plus a dead-simple CLI.
+- **📜 Every version, side by side** — compare *any* translations in
+  one view: `bible -c John 3:16 KJV NIV NLT NKJV ESV`. Or all of them
+  at once with `[en]` / `[no]`.
+- **🚫 Offline KJV** — a full, searchable local database (SQLite FTS5).
+  No internet? Read on. Scriptures don't need a signal.
+- **⭐ Your highlights, in your terminal** — sign in to YouVersion once,
+  and your highlighted verses appear inline while you read, color-coded
+  per chapter (OAuth PKCE, one login, no registration).
+- **✨ A proverb a day** — Proverbs has exactly 31 chapters for the 31 days
+  of the month. Read it or listen to it, every day, right where you left off.
+- **📘 Reading plans** — pick a book like *Psalm 65*, and Read and Listen
+  stay in perfect step: `Continue` always resumes your spot, whether you
+  read or heard it last.
+- **🔍 References that just work** — `2 Timoteus 1:2`, `2 Timoteus 1 2`,
+  ranges, no-colon, spaces or not — type it the way you think it.
+- **⌨️ Made for your keyboard** — arrow-key navigation, single-letter
+  shortcuts, pipe anything to your clipboard.
+- **🕊️ "Are You Saved?"** — an interactive gospel walkthrough built on
+  the Way of the Master method of Ray Comfort (Living Waters), right in
+  your terminal.
+- **🔄 One command to update** — `bible self-update` fetches, verifies
+  and atomically swaps in the latest version. It even checks silently
+  at launch and reminds you when an update is ready.
+
+> *Blessed is the one who reads aloud the words of this prophecy…
+> for the appointed time is near.* — **Revelation 1:3**
 
 ---
 
@@ -300,16 +311,56 @@ Active when an app key is configured and the requested version is
 licensed; otherwise everything falls back to the regular scraping
 paths.
 
-## ⭐ Highlights
+## ⭐ Highlights — your verses, in your terminal
 
-OAuth PKCE login with the YouVersion Data-Exchange flow, then sync your
-favorites/notes via `/v1/highlights`:
+Your Bible reading is yours. `bible.sh` signs in to your YouVersion
+account once (OAuth PKCE, no passwords stored) and brings your
+**highlighted verses right into the terminal** — and it *ships with the
+App Key already configured*, so **you don't have to register anything**.
+Run one command, approve it in your browser, and you're in:
 
 ```shell
-bible hl login      # start the OAuth approval flow
-bible hl list       # list your highlights
-bible hl add ...    # add a highlight
+bible hl login          # one-time sign-in — that's it
+bible hl status         # see your config, token and signed-in account
+bible hl list JHN.3     # highlight colors of John 3 (current chapter by default)
+bible hl add JHN.3.16   # highlight a verse (pick a color: bible hl add JHN.3.16 44aa44)
+bible hl rm  JHN.3.16   # clear the highlight on that verse
 ```
+
+While you read or listen to a chapter, highlighted verses are **marked
+inline with a colored ●** so you can see at a glance which verses you've
+underlined on the bright side.
+
+The Highlights entry in the menu (`g`) is a small **highlights browser**:
+it lets you scan a whole book — the one you're reading or any other —
+for every chapter that has highlights, then open any of those chapters
+with the markers inline. Jump straight to the current chapter's
+highlights from the same menu.
+
+YouVersion's API stores highlights per *verse group* as a color
+(`RRGGBB`), keyed by Bible version — there's no "list everything" call,
+so the browser queries each chapter in the book in one parallel sweep (a
+150-chapter book takes under two seconds). Listing every highlight in the
+whole Bible would mean ~1,189 chapter requests per version, so the menu
+keeps its scope to one book at a time.
+
+Everything the code needs is already built in: a shared public OAuth
+client_id (XOR-masked in the source so it never sits in plaintext, and
+safe to share — it's not a secret) plus a default Redirect URI of
+`http://localhost:8080/oauth` that matches the registered callback
+exactly, so the approval flow just works.
+
+Prefer your **own** Platform app? Fully optional: override the App Key
+via `YVP_APP_KEY` or `bible hl config` (saved to
+`~/.credentials/.bible.com_token`) and set your Redirect URI to whatever
+you registered — it must match your app's callback exactly, and it never
+has to load. `YVP_APP_KEY` / `YVP_REDIRECT_URI` env vars always win.
+
+Prefer your **own** Platform app? Fully optional: override the App Key
+via `YVP_APP_KEY` or `bible hl config` (saved to
+`~/.credentials/.bible.com_token`) and set your Redirect URI to whatever
+you registered — it must match your app's callback exactly, and it never
+has to load. `YVP_APP_KEY` / `YVP_REDIRECT_URI` env vars always win.
 
 ---
 

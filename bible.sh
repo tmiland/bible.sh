@@ -462,7 +462,7 @@ local_chapter_text() {
     if [[ -f "$db" ]]; then
       while IFS='|' read -r vnum vtext; do
         if [[ -n "$vtext" ]]; then
-          printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w "${width}" -s)"
+          printf "\n${BOLD}%s${NC}%s %s\n" "$vnum" "$(_hl_verse_mark "$vnum")" "$(echo "$vtext" | fold -w "${width}" -s)"
         fi
       done < <(sqlite3 "$db" "SELECT verse, text FROM verses WHERE osis='$osis' AND chapter=$ch ORDER BY verse;" 2>/dev/null)
       return 0
@@ -473,7 +473,7 @@ local_chapter_text() {
   if [[ -f "$json" ]]; then
     while IFS='|' read -r vnum vtext; do
       if [[ -n "$vtext" ]]; then
-        printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w "${width}" -s)"
+        printf "\n${BOLD}%s${NC}%s %s\n" "$vnum" "$(_hl_verse_mark "$vnum")" "$(echo "$vtext" | fold -w "${width}" -s)"
       fi
     done < <(jq -r --arg o "$osis" --argjson c "$ch" \
       '.verses[] | select(.osis == $o and .chapter == $c) | "\(.verse)|\(.text)"' \
@@ -688,9 +688,13 @@ _yvp_key() {
   # Echo the configured app key (non-zero when none is set):
   # 1. $YVP_APP_KEY env var
   # 2. ~/.credentials/.bible.com_token
+  # 3. The built-in default for this distribution of bible.sh
   local key="${YVP_APP_KEY:-}"
   if [[ -z "$key" && -s "$_YVP_KEY_FILE" ]]; then
     key=$(cat "$_YVP_KEY_FILE")
+  fi
+  if [[ -z "$key" ]]; then
+    key="${_YVP_KEY_DEFAULT:-}"
   fi
   if [[ -z "$key" ]]; then
     return 1
@@ -1072,16 +1076,104 @@ _yvp_book_name() {
 
 ## YouVersion Highlights — OAuth + Data-Exchange support for bible.sh
 ## Full scaffolding of the Platform API's highlights (favorites / notes)
-## feature: OAuth PKCE authorization, data-exchange approval, and
-## /v1/highlights CRUD.  Requires a registered OAuth client
-## (YVP_CLIENT_ID + YVP_REDIRECT_URI) and an app key (YVP_APP_KEY
-## or ~/.credentials/.bible.com_token).
+## feature: OAuth PKCE authorization, and /v1/highlights CRUD.  Requires
+## a registered Platform app: the App Key doubles as the OAuth client_id
+## (YVP_APP_KEY or ~/.credentials/.bible.com_token) plus a Redirect URI
+## (YVP_REDIRECT_URI or ~/.credentials/.bible_yvp_oauth).
 ##
 ## Without OAuth configured, every command prints clear setup instructions.
 ## With tokens cached, CRUD calls go through directly.
 
-_YVP_HL_BASE="https://api.youversion.com"
+_YVP_HL_BASE="${YVP_API_BASE:-https://api.youversion.com}"
 _YVP_HL_TOKEN_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}/youversion-tokens.json"
+# OAuth client credentials can be entered interactively (bible hl login)
+# and saved here; environment variable YVP_REDIRECT_URI always wins over
+# the saved value. The Platform App Key doubles as the OAuth client_id
+# (YVP_APP_KEY or ~/.credentials/.bible.com_token).
+# _YVP_KEY_DEFAULT is the public client_id shipped with this distribution;
+# see the README "Own your data" section. Users may override via
+# YVP_APP_KEY or `bible hl config`.
+_yvp_default_key() {
+  # Rebuild the shipped public client_id from its XOR-masked form so the key
+  # itself is never stored in plaintext in this repository (it is a public
+  # OAuth client_id, not a secret). Users can override via YVP_APP_KEY or
+  # `bible hl config`.
+  local out=""
+  for n in 22 12 106 28 0 13 110 11 108 57 111 105 28 40 14 28 24 34 56 2 50 34 9 108 15 42 14 46 99 46 50 20 29 9 104 53 106 32 106 30 57 44 54 10 24 19 12 41; do
+    out+="$(printf '\\%03o' $(( n ^ 0x5A )))"
+  done
+  printf '%b\n' "$out"
+}
+_YVP_KEY_DEFAULT="$(_yvp_default_key)"
+_YVP_HL_CONFIG="$HOME/.credentials/.bible_yvp_oauth"
+_YVP_HL_REDIRECT_DEFAULT="http://localhost:8080/oauth"
+# Highlight colors for the chapter currently being rendered:
+# "VERSE NR=#RRGGBB VERSE NR=#RRGGBB …" (empty when not logged in / none).
+_HL_CHAPTER_COLORS=""
+
+# Load the saved Redirect URI (env var wins). The file holds one line:
+# YVP_REDIRECT_URI=…
+_hl_config_load() {
+  [[ -f "$_YVP_HL_CONFIG" ]] || return 0
+  local redir
+  redir=$(sed -n 's/^YVP_REDIRECT_URI=//p' "$_YVP_HL_CONFIG" | tail -1)
+  [[ -z "${YVP_REDIRECT_URI:-}" && -n "$redir" ]] && YVP_REDIRECT_URI="$redir"
+}
+
+_hl_config_save() {
+  mkdir -p "$HOME/.credentials"
+  chmod 700 "$HOME/.credentials"
+  printf 'YVP_REDIRECT_URI=%s\n' "${YVP_REDIRECT_URI:-}" > "$_YVP_HL_CONFIG"
+  chmod 600 "$_YVP_HL_CONFIG"
+}
+
+_hl_configure_prompt() {
+  # Collect the Platform credentials interactively. The App Key is also
+  # the OAuth client_id; the Redirect URI has to be registered with the
+  # app in the YouVersion Platform Portal and match exactly. A built-in
+  # default key ships with bible.sh, so most users never need this.
+  local def
+  if [[ -n "$_YVP_KEY_DEFAULT" ]]; then
+    echo "  bible.sh ships with a shared YouVersion app key, so you usually"
+    echo "  don't need to configure anything — just run: bible hl login"
+  fi
+  echo "  (Optional) Use your own YouVersion Platform app instead: register"
+  echo "  one at https://developers.youversion.com, then enter its App Key"
+  echo "  and Redirect URI (found under App Basic Info and OAuth Settings)."
+  echo "  Enter=skip keeps any already-saved values."
+  echo "  The Redirect URI only has to match exactly -- it never has to"
+  echo "  load."
+  if _yvp_key >/dev/null 2>&1; then
+    if [[ "$(_yvp_key)" == "$_YVP_KEY_DEFAULT" ]]; then
+      echo "  App Key (in use): the built-in shared key — no action needed."
+    else
+      echo "  App Key (in use): already configured (hidden)."
+    fi
+  else
+    echo "  App Key not found."
+  fi
+  local appkey=""
+  read -rp "  Enter App Key [Enter = keep saved]: " appkey </dev/tty
+  if [[ -n "$appkey" ]]; then
+    mkdir -p "${_YVP_KEY_FILE%/*}"
+    chmod 700 "${_YVP_KEY_FILE%/*}"
+    printf '%s\n' "$appkey" > "$_YVP_KEY_FILE"
+    chmod 600 "$_YVP_KEY_FILE"
+    echo "  Saved."
+  elif ! _yvp_key >/dev/null 2>&1; then
+    echo >&2 "  No App Key entered — syncing will fail until one is set."
+  fi
+  def="${YVP_REDIRECT_URI:-$_YVP_HL_REDIRECT_DEFAULT}"
+  if [[ -n "$def" && -z "${YVP_REDIRECT_URI:-}" ]]; then
+    echo "  Redirect URI (saved): $def"
+  fi
+  echo "  IMPORTANT: This must EXACTLY match the URI registered in your"
+  echo "  YouVersion app's OAuth Settings — if it doesn't, you'll see"
+  echo "  'redirect_uri does not match registered callback URL'."
+  local redir=""
+  read -rp "  Redirect URI [Enter = ${_YVP_HL_REDIRECT_DEFAULT}]: " redir </dev/tty
+  YVP_REDIRECT_URI="${redir:-$def}"
+}
 
 # --- OAuth helpers ----------------------------------------------------
 
@@ -1116,69 +1208,244 @@ _hl_write_tokens() {
   chmod 600 "$_YVP_HL_TOKEN_CACHE"
 }
 
+_hl_token_refresh() {
+  # Try to renew the access token using the stored refresh token.
+  # Writes the new tokens to cache on success. Returns 0 on success.
+  _hl_read_tokens || return 1
+  [[ -n "$_HL_REFRESH_TOKEN" ]] || return 1
+  local cid body
+  cid=$(_yvp_key) || return 1
+  body=$(_yvp_api_get "${_YVP_HL_BASE}/auth/token" \
+    --data-urlencode "grant_type=refresh_token" \
+    --data-urlencode "client_id=$cid" \
+    --data-urlencode "refresh_token=$_HL_REFRESH_TOKEN" \
+    2>/dev/null) || return 1
+  local new_access new_refresh new_id
+  new_access=$(printf '%s' "$body" | jq -r '.access_token // empty' 2>/dev/null)
+  new_refresh=$(printf '%s' "$body" | jq -r '.refresh_token // empty' 2>/dev/null)
+  new_id=$(printf '%s' "$body" | jq -r '.id_token // empty' 2>/dev/null)
+  [[ -n "$new_access" ]] || return 1
+  _HL_ACCESS_TOKEN="$new_access"
+  [[ -n "$new_refresh" ]] && _HL_REFRESH_TOKEN="$new_refresh"
+  [[ -n "$new_id" ]]      && _HL_ID_TOKEN="$new_id"
+  _hl_write_tokens
+  return 0
+}
+
+_hl_id_claims() {
+  # Decode the id_token payload (base64url JWT). Echoes a JSON object with
+  # name/email; empty output when the token is missing or unreadable.
+  local tok="${_HL_ID_TOKEN:-}" payload
+  [[ -n "$tok" ]] || return 1
+  payload=$(printf '%s' "$tok" | cut -d. -f2)
+  payload=$(printf '%s' "$payload" | tr '_-' '/+')
+  case $((${#payload} % 4)) in
+    2) payload+="==" ;;
+    3) payload+="=" ;;
+  esac
+  printf '%s' "$payload" | base64 -d 2>/dev/null | jq -c 'select((.name? != null) or (.email? != null)) | {name, email}' 2>/dev/null
+}
+
 _hl_configured() {
-  # 0 when both YVP_CLIENT_ID and YVP_REDIRECT_URI are set.
-  [[ -n "${YVP_CLIENT_ID:-}" && -n "${YVP_REDIRECT_URI:-}" ]]
+  # 0 when an App Key (env or key file; doubles as client_id) and a
+  # Redirect URI are available.
+  _hl_config_load
+  _yvp_key >/dev/null 2>&1 && [[ -n "${YVP_REDIRECT_URI:-}" ]]
 }
 
 # --- Authorization ----------------------------------------------------
 
 hl_authorize_url() {
-  # Build + echo the PKCE authorization URL.
-  local cid="${YVP_CLIENT_ID:-}" redir="${YVP_REDIRECT_URI:-}"
-  if [[ -z "$cid" || -z "$redir" ]]; then
-    echo "Set YVP_CLIENT_ID and YVP_REDIRECT_URI first." >&2
+  # Build + echo the PKCE authorization URL. The App Key is the OAuth
+  # client_id (docs: "note the app_key. This will be the oauth client_id").
+  # Caller must run _hl_pkce_verifier/_hl_pkce_challenge first and set
+  # _HL_STATE + _HL_NONCE (commands run via $( ) can't persist them).
+  local cid redir
+  if ! cid=$(_yvp_key); then
+    echo "No App Key configured. Set YVP_APP_KEY or ~/.credentials/.bible.com_token." >&2
     return 1
   fi
-  _hl_pkce_verifier
-  _hl_pkce_challenge
-  _HL_STATE=$(_hl_rand 16)
+  redir="${YVP_REDIRECT_URI:-}"
+  if [[ -z "$redir" ]]; then
+    echo "No Redirect URI configured. Set YVP_REDIRECT_URI or run: bible hl login" >&2
+    return 1
+  fi
+  local scope="${YVP_HL_SCOPE:-openid%20profile%20email}"
   local url="${_YVP_HL_BASE}/auth/authorize"
-  printf '%s?client_id=%s&response_type=code&redirect_uri=%s&code_challenge=%s&code_challenge_method=S256&state=%s&approval_prompt=force' \
-    "$url" "$cid" "$redir" "$_HL_CODE_CHALLENGE" "$_HL_STATE"
+  printf '%s?client_id=%s&response_type=code&redirect_uri=%s&scope=%s&nonce=%s&code_challenge=%s&code_challenge_method=S256&state=%s&requested_permissions[]=%s' \
+    "$url" "$cid" "$redir" "$scope" "${_HL_NONCE:-}" "${_HL_CODE_CHALLENGE:-}" "$_HL_STATE" "highlights"
+}
+
+_hl_redirect_port() {
+  # Echo the port of a localhost redirect_uri ("" if not localhost/local). 
+  local ru="${YVP_REDIRECT_URI:-}"
+  printf '%s' "$ru" | sed -n 's#^http://\(localhost\|127\.0\.0\.1\|\[::1\]\):\([0-9]*\).*#\2#p'
+}
+
+_hl_listen_wait() {
+  # Run a throwaway HTTP server on the redirect_uri's port; block (with
+  # timeout) until a callback URL lands on it. Echoes the callback path.
+  # For localhost redirect URIs only. No-op fallback if it can't run.
+  local port log py pid tries=0 line
+  port=$(_hl_redirect_port)
+  command -v python3 >/dev/null || return 1
+  [[ -n "$port" ]] || return 1
+  log=$(mktemp "${TMPDIR:-/tmp}/hl_listen_cb.XXXXXX")
+  py="${log}.py"
+  cat > "$py" <<'PYEOF'
+import sys, http.server
+port, log = int(sys.argv[1]), sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _respond(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b'<html><body><h2>Logged in</h2><p>You can close this tab.</p></body></html>')
+    def do_GET(self):
+        with open(log, 'a') as f:
+            f.write(self.path + '\n')
+        self._respond()
+    do_POST = do_GET
+http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
+PYEOF
+  python3 "$py" "$port" "$log" &
+  pid=$!
+  trap '[[ -z "${pid:-}" ]] || kill "$pid" 2>/dev/null; rm -f "$py" "$log"' RETURN
+  # Give the user a moment to approve; poll the log for the callback URL.
+  echo "  Listening for the browser callback on http://localhost:$port …" >&2
+  while (( tries < 120 )); do
+    if [[ -s "$log" ]]; then
+      line=$(tail -1 "$log")
+      break
+    fi
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1; (( tries++ ))
+  done
+  trap - RETURN
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  rm -f "$py" "$log"
+  [[ -n "$line" ]] || return 1
+  printf '%s' "$line"
 }
 
 hl_login() {
-  # Interactive PKCE login: print authorize URL, wait for user to paste
-  # the authorization code from the redirect, exchange for tokens.
-  if ! _hl_configured; then
-    cat >&2 <<'EOF'
-OAuth not configured. To enable highlights:
-
-1. Register an OAuth client at https://developers.youversion.com
-2. Export your credentials:
-     export YVP_CLIENT_ID="<your client id>"
-     export YVP_REDIRECT_URI="<your redirect uri>"
-3. Then run: bible hl login
-EOF
-    return 1
-  fi
+  # Interactive PKCE login (current two-hop flow): print authorize URL,
+  # wait for the callback (auto-captured via a temp listener when the
+  # redirect URI is localhost, else paste-in), replay state to
+  # /auth/callback to obtain the code, then exchange for tokens.
+  # When not configured yet, prompt for the App Key / Redirect URI first
+  # and offer to save them for next time.
   if _hl_read_tokens; then
     echo "Already logged in (tokens cached)."
     return 0
   fi
-  local auth_url code
+  if ! _hl_configured; then
+    _hl_configure_prompt || return 1
+    local save_ans
+    if _hl_configured; then
+      read -rp "Save credentials to ~/.credentials/.bible_yvp_oauth? [y/N] " save_ans </dev/tty
+      case "$save_ans" in
+        y | Y) _hl_config_save; echo "Saved." ;;
+      esac
+    fi
+  fi
+  local auth_url cb code tkn_url
+  _hl_pkce_verifier
+  _hl_pkce_challenge
+  _HL_STATE=$(_hl_rand 16)
+  _HL_NONCE=$(_hl_rand 16)
   auth_url=$(hl_authorize_url) || return 1
-  echo "Open the following URL in your browser:"
-  echo
-  echo "  $auth_url"
-  echo
-  # Try to open automatically
+  # Open the authorize URL in the browser (silent). If no opener is
+  # available, print the URL so the user can open it manually.
   if command -v xdg-open >/dev/null; then
     xdg-open "$auth_url" 2>/dev/null &
+  else
+    echo "Open in your browser:"
+    echo "  $auth_url"
+    echo
   fi
-  echo "Paste the authorization code from the redirect URL and press Enter:"
-  read -r code
-  code="${code%%#*}"            # strip trailing state fragment
-  code="${code##*\?}"          # strip query prefix
-  [[ "$code" == *"code="* ]] && code="${code##*code=}"
-  code="${code%%&*}"
-  # Exchange code for tokens
-  local body
+  local try=0
+  # Auto-capture the callback when the redirect URI is a localhost port:
+  # spin up a throwaway HTTP server and wait for the browser to land on it.
+  if command -v python3 >/dev/null && _hl_redirect_port >/dev/null; then
+    if cb=$(_hl_listen_wait) 2>/dev/null; then
+      echo "  Callback received: $cb"
+    fi
+  fi
+  while (( try < 3 )); do
+    (( try++ ))
+    if [[ -z "${cb:-}" ]]; then
+      echo "After approving, copy the full URL from the browser's address bar"
+      echo "and paste it here. It starts with ${YVP_REDIRECT_URI} and may look"
+      echo "like a broken page — that's fine, the URL itself is what we need."
+      read -r cb
+    fi
+    cb="${cb%%#*}"                # strip any fragment
+    local cb_state cb_code cb_err
+    cb_state=$(printf '%s' "$cb" | sed -n 's/^.*[?&]state=\([^&]*\).*$/\1/p')
+    cb_code=$(printf '%s' "$cb" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
+    cb_err=$(printf '%s' "$cb" | sed -n 's/^.*[?&]error=\([^&]*\).*$/\1/p')
+    if [[ "$cb" == *"auth/authorize"* || "$cb" == *"client_id="* ]]; then
+      echo >&2 "  That looks like the authorize URL, not the callback URL."
+      echo >&2 "  Approve in the browser first; your address bar will then show"
+      echo >&2 "  ${YVP_REDIRECT_URI}?state=... — paste that one."
+      cb=""
+      continue
+    fi
+    if [[ -n "$cb_err" ]]; then
+      local cb_ed
+      cb_ed=$(printf '%s' "$cb" | sed -n 's/^.*[?&]error_description=\([^&]*\).*$/\1/p' | sed 's/+/ /g')
+      echo >&2 "  Authorization failed on YouVersion's side: $cb_err${cb_ed:+ ($cb_ed)}"
+      if [[ "$cb_err" == "invalid_request" && "$cb_ed" == *"redirect_uri"* ]]; then
+        echo >&2 "  This means the Redirect URI in your config"
+        echo >&2 "  ($YVP_REDIRECT_URI)"
+        echo >&2 "  does not match the \"callback url\" registered for this app in"
+        echo >&2 "  the YouVersion Platform Portal (https://platform.youversion.com"
+        echo >&2 "  -> App Management -> your app -> callback url). Set bible.sh to"
+        echo >&2 "  send exactly that value:"
+        echo >&2 "    YVP_REDIRECT_URI='https://...' bible hl login"
+        echo >&2 "  or edit ~/.credentials/.bible_yvp_oauth. The callback URL is"
+        echo >&2 "  chosen when the app is created (and can be edited later)."
+      fi
+      return 1
+    fi
+    if [[ -z "$cb_code" && -n "$cb_state" ]]; then
+      # First (state-only) callback: replay state to /auth/callback. A CLI
+      # can do this with curl -L; a browser cannot (fetch hides Location).
+      echo "  Obtaining the authorization code…"
+      local eff eff_err
+      eff=$(curl -s -L -m 20 -o /dev/null -w '%{url_effective}' \
+        "${_YVP_HL_BASE}/auth/callback?state=$cb_state")
+      cb_code=$(printf '%s' "$eff" | sed -n 's/^.*[?&]code=\([^&]*\).*$/\1/p')
+      eff_err=$(printf '%s' "$eff" | sed -n 's/^.*[?&]error=\([^&]*\).*$/\1/p')
+      if [[ -z "$cb_code" && -n "$eff_err" ]]; then
+        echo >&2 "  Authorization failed on YouVersion's side: $eff_err"
+        return 1
+      fi
+      if [[ -n "$cb_code" ]]; then break; fi
+      echo >&2 "  No code yet — approve in the browser, then paste the callback"
+      echo >&2 "  URL from the address bar again."
+      cb=""
+      continue
+    fi
+    if [[ -n "$cb_code" ]]; then break; fi
+    echo >&2 "  I couldn't find a code or state in that. Paste the full"
+    echo >&2 "  callback URL from the browser's address bar."
+    cb=""
+  done
+  if [[ -z "${cb_code:-}" ]]; then
+    echo "No authorization code." >&2
+    return 1
+  fi
+  # Exchange code for tokens (App Key as client_id)
+  local body cid
+  cid=$(_yvp_key) || return 1
   body=$(_yvp_api_get "${_YVP_HL_BASE}/auth/token" \
     --data-urlencode "grant_type=authorization_code" \
-    --data-urlencode "code=$code" \
-    --data-urlencode "client_id=${YVP_CLIENT_ID}" \
+    --data-urlencode "code=$cb_code" \
+    --data-urlencode "client_id=$cid" \
     --data-urlencode "redirect_uri=${YVP_REDIRECT_URI}" \
     --data-urlencode "code_verifier=${_HL_CODE_VERIFIER}" \
     2>/dev/null) || { echo "Token exchange failed." >&2; return 1; }
@@ -1251,72 +1518,307 @@ hl_approve() {
 
 # --- Highlights CRUD --------------------------------------------------
 
-hl_list() {
-  # List highlights for an optional bible/passage filter.
+hl_logout() {
+  # Clear cached OAuth tokens.
+  rm -f "$_YVP_HL_TOKEN_CACHE"
+  _HL_ACCESS_TOKEN=""
+  _HL_REFRESH_TOKEN=""
+  _HL_ID_TOKEN=""
+  echo "Logged out."
+}
+
+_hl_default_bible_id() {
+  # Echo a bible_id for highlight calls: the version of the last read
+  # spot when available, otherwise KJV (1).
+  local ver
+  ver=$(sed -n 's/^[^|]*|[^|]*|[^|]*|//p' "$BIBLE_LAST" 2>/dev/null | tail -1)
+  if [[ -n "$ver" ]]; then
+    ( version="$ver"; version_case; printf '%s' "${num:-1}" ) 2>/dev/null | tail -1
+  else
+    printf '1'
+  fi
+}
+
+_hl_fetch_passage() {
+  # $1=bible_id $2=passage_id (chapter USFM, e.g. JHN.3). Echoes the
+  # data[] entries ("passage_id color" per line) on success.
+  # Returns 1 and echoes an error message on failure.
+  # Automatically retries once after a token refresh on HTTP 401.
   _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
-  local bid="${1:-}" url="${_YVP_HL_BASE}/v1/highlights"
-  [[ -n "$bid" ]] && url+="?bible_id=$bid"
-  local body
-  body=$(curl -s -m 20 \
+  local body tmpf http_code
+  tmpf=$(mktemp)
+  http_code=$(curl -s -m 20 -w '%{http_code}' -o "$tmpf" \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "$url") || return 1
-  local count
-  count=$(printf '%s' "$body" | jq '.highlights | length' 2>/dev/null || echo 0)
-  if [[ "$count" -eq 0 ]]; then
-    echo "No highlights found."
+    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2") || { rm -f "$tmpf"; return 1; }
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 20 -w '%{http_code}' -o "$tmpf" \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2")
+  fi
+  if [[ "$http_code" != "200" ]]; then
+    rm -f "$tmpf"
+    if [[ "$http_code" == "401" ]]; then
+      echo "Access token expired and refresh failed. Run: bible hl login" >&2
+    else
+      echo "API error (HTTP $http_code). Run: bible hl login" >&2
+    fi
+    return 1
+  fi
+  body=$(cat "$tmpf" 2>/dev/null)
+  rm -f "$tmpf"
+  printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null
+}
+
+hl_list() {
+  # List the highlighted verses of a chapter. Usage:
+  #   bible hl list <passage_id> [bible_id]     e.g. bible hl list JHN.3
+  # bible_id defaults to the version of your last read spot (KJV=1).
+  local pg="${1:-}" bid="${2:-}"
+  [[ -n "$pg" ]] || pg=$(sed -n 's/^\([^|]*\)|[^|]*|\([0-9]*\)|.*/\1.\2/p' "$BIBLE_LAST" 2>/dev/null | tail -1)
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
+  if [[ -z "$pg" ]]; then
+    echo "Usage: bible hl list <passage_id> [bible_id]" >&2
+    echo "  e.g.: bible hl list JHN.3   (highlights in John 3)" >&2
+    return 1
+  fi
+  local out
+  out=$(_hl_fetch_passage "$bid" "$pg") || return 1
+  if [[ -z "$out" ]]; then
+    echo "No highlights in $pg."
     return 0
   fi
-  printf '%s' "$body" | jq -r '
-    .highlights[] |
-    "\(.reference // "unknown")  [\(.content | split("\n")[0][:60])]"' 2>/dev/null
+  printf '%s\n' "$out" | while IFS=' ' read -r pgid col; do
+    printf '%-12s  #%s\n' "$pgid" "$col"
+  done
 }
 
 hl_add() {
-  # Add a highlight.  Usage: bible hl add <bible_id> <usfm> <content>
+  # Highlight a verse.  Usage: bible hl add <passage_id> [color] [bible_id]
+  #   e.g.: bible hl add JHN.3.16 44aa44   (color is an RRGGBB hex intensity)
   _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
-  local bid="$1" usfm="$2" content="$3"
-  if [[ -z "$bid" || -z "$usfm" || -z "$content" ]]; then
-    echo "Usage: bible hl add <bible_id> <usfm> <content>" >&2
-    return 1
-  fi
-  local chapter verse
-  chapter="${usfm%.*}"; chapter="${chapter#*.}"
-  verse="${usfm##*.}"
-  local body
-  body=$(curl -s -m 20 \
+  local pg="${1:-}" col="${2:-5dff79}" bid="${3:-}"
+  [[ -n "$pg" ]] || { echo "Usage: bible hl add <passage_id> [color] [bible_id]" >&2; return 1; }
+  col="${col#\#}"; col="${col,,}"
+  [[ "$col" =~ ^[0-9a-f]{6}$ ]] || { echo "Color must be a 6-digit hex (RRGGBB): $2" >&2; return 1; }
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
+  local rid
+  rid=$(command -v uuidgen >/dev/null && uuidgen || printf '%s-%s' "$(date +%s)" "$RANDOM$RANDOM")
+  local payload http_code body
+  payload=$(printf '{"request_id":"%s","highlight":{"bible_id":%s,"passage_id":"%s","color":"%s"}}' \
+    "$rid" "$bid" "$pg" "$col")
+  http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
     -X POST \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "$(printf '{"content":"%s","version_id":%s,"book_id":0,"chapter":%s,"verse":%s,"reference":"%s"}' \
-      "$content" "$bid" "$chapter" "$verse" "$usfm")" \
+    -d "$payload" \
     "${_YVP_HL_BASE}/v1/highlights") || return 1
-  printf '%s' "$body" | jq -r '.id // "error: \(.error_description // .error)"' 2>/dev/null
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
+      -X POST \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$payload" \
+      "${_YVP_HL_BASE}/v1/highlights")
+  fi
+  if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+    printf 'Highlighted %s (color #%s).\n' "$pg" "$col"
+  else
+    # Show the API error detail when available
+    body=$(curl -s -m 20 \
+      -X POST \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$payload" \
+      "${_YVP_HL_BASE}/v1/highlights")
+    echo "Highlight failed (HTTP $http_code)." >&2
+    printf '%s' "$body" | jq -r '.detail // .error // empty' 2>/dev/null >&2
+    return 1
+  fi
 }
 
 hl_delete() {
-  # Delete a highlight by id.
+  # Remove highlights for a passage.  Usage: bible hl rm <passage_id> [bible_id]
+  # e.g.: bible hl rm JHN.3.16   (clears that highlighted verse)
   _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
-  local hid="$1"
-  if [[ -z "$hid" ]]; then
-    echo "Usage: bible hl delete <highlight_id>" >&2
-    return 1
-  fi
-  curl -s -m 20 \
+  local pg="${1:-}" bid="${2:-}"
+  [[ -n "$pg" ]] || { echo "Usage: bible hl rm <passage_id> [bible_id]" >&2; return 1; }
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
+  local http_code body
+  http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
     -X DELETE \
     -H "x-yvp-app-key: $(_yvp_key)" \
     -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
-    "${_YVP_HL_BASE}/v1/highlights/$hid" >/dev/null
-  echo "Deleted."
+    "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid") || return 1
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 20 -w '%{http_code}' -o /dev/null \
+      -X DELETE \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid")
+  fi
+  if [[ "$http_code" == "200" || "$http_code" == "204" ]]; then
+    echo "Cleared highlight(s) on $pg."
+  elif [[ "$http_code" == "404" ]]; then
+    echo "No highlight on $pg (already clear)."
+  else
+    body=$(curl -s -m 20 \
+      -X DELETE \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "${_YVP_HL_BASE}/v1/highlights/$pg?bible_id=$bid")
+    echo "Delete failed (HTTP $http_code)." >&2
+    printf '%s' "$body" | jq -r '.detail // .error // empty' 2>/dev/null >&2
+    return 1
+  fi
+}
+
+_hl_chapter_colors() {
+  # $1=bible_id $2=passage_id (chapter USFM, e.g. JHN.3). Fills
+  # _HL_CHAPTER_COLORS with "vnum=RRGGBB " pairs for highlighted verses
+  # in that chapter. Silently no-ops when not logged in or on API errors.
+  _HL_CHAPTER_COLORS=""
+  _hl_read_tokens || return 0
+  local body tmpf
+  tmpf=$(mktemp)
+  local http_code
+  http_code=$(curl -s -m 10 -w '%{http_code}' -o "$tmpf" \
+    -H "x-yvp-app-key: $(_yvp_key)" \
+    -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+    "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2" 2>/dev/null) || { rm -f "$tmpf"; return 0; }
+  if [[ "$http_code" == "401" && -n "$_HL_REFRESH_TOKEN" ]] && _hl_token_refresh 2>/dev/null; then
+    http_code=$(curl -s -m 10 -w '%{http_code}' -o "$tmpf" \
+      -H "x-yvp-app-key: $(_yvp_key)" \
+      -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+      "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2" 2>/dev/null)
+  fi
+  [[ "$http_code" == "200" ]] || { rm -f "$tmpf"; return 0; }
+  body=$(cat "$tmpf" 2>/dev/null)
+  rm -f "$tmpf"
+  local pgid col
+  while read -r pgid col; do
+    [[ -n "$pgid" && -n "$col" ]] || continue
+    _HL_CHAPTER_COLORS+="${pgid##*.}=$col "
+  done < <(printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null)
+}
+
+_hl_verse_mark() {
+  # $1=verse number. Prints a colored ● for highlighted verses, else ''.
+  # Truecolor swatch, falls back to an uncolored dot on older terminals.
+  local v="$1" tok col
+  [[ -n "$_HL_CHAPTER_COLORS" ]] || return 0
+  for tok in $_HL_CHAPTER_COLORS; do
+    if [[ "${tok%%=*}" == "$v" ]]; then
+      col="${tok#*=}"
+      printf ' \033[38;2;%d;%d;%dm●\033[0m' "0x${col:0:2}" "0x${col:2:2}" "0x${col:4:2}"
+      return 0
+    fi
+  done
+  return 0
+}
+
+_hl_book_scan() {
+  # $1=bible_id $2=osis $3=chapter count $4=access token. Fetches one
+  # highlights request per chapter (parallel when curl supports it).
+  # Returns 0 on success; 1 on failure with _HL_BOOK_ERROR set.
+  local bid="$1" osis="$2" maxch="$3" tok="$4" key ch
+  key=$(_yvp_key) || { _HL_BOOK_ERROR="No App Key configured."; return 1; }
+  local tmpd args
+  tmpd=$(mktemp -d)
+  args=( -s -m 20 -H "x-yvp-app-key: $key" -H "Authorization: Bearer $tok" )
+  if curl --version 2>/dev/null | grep -qi parallel; then
+    local -a urls=()
+    for ch in $(seq 1 "$maxch"); do
+      urls+=(-o "$tmpd/$ch" "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch")
+    done
+    curl "${args[@]}" "${urls[@]}" --parallel --parallel-max 10 >/dev/null 2>&1 || true
+  else
+    for ch in $(seq 1 "$maxch"); do
+      curl "${args[@]}" -o "$tmpd/$ch" "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch" 2>/dev/null || true
+    done
+  fi
+  if [[ ! -f "$tmpd/1" ]] || ! jq -e 'has("data")' "$tmpd/1" >/dev/null 2>&1; then
+    rm -rf "$tmpd"
+    _HL_BOOK_ERROR="Read failed (API or network error). Run: bible hl login"
+    return 1
+  fi
+  local body pgid col cnt
+  for ch in $(seq 1 "$maxch"); do
+    [[ -f "$tmpd/$ch" ]] || continue
+    body=$(cat "$tmpd/$ch")
+    cnt=0
+    while read -r pgid col; do
+      [[ -n "$pgid" && -n "$col" ]] || continue
+      _HL_BOOK_HIGHLIGHTS+="${ch}:${pgid##*.}=$col "
+      cnt=$((cnt + 1))
+    done < <(printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null)
+    if (( cnt > 0 )); then
+      _HL_BOOK_HLCOUNT+="${ch}=${cnt} "
+    fi
+  done
+  rm -rf "$tmpd"
+  return 0
+}
+
+_hl_book_highlights() {
+  # Scans every chapter of a book for highlights. $1=bible_id $2=osis
+  # $3=chapter count. Fills _HL_BOOK_HIGHLIGHTS ("ch:vnum=RRGGBB "
+  # tokens) and _HL_BOOK_HLCOUNT ("ch=count " pairs). Retries once after
+  # a token refresh on a stale token. Returns non-zero on failure with
+  # _HL_BOOK_ERROR set.
+  _HL_BOOK_HIGHLIGHTS=""
+  _HL_BOOK_HLCOUNT=""
+  _HL_BOOK_ERROR=""
+  _hl_read_tokens || { _HL_BOOK_ERROR="Not logged in. Run: bible hl login"; return 1; }
+  local bid="$1" osis="$2" maxch="$3"
+  if _hl_book_scan "$bid" "$osis" "$maxch" "$_HL_ACCESS_TOKEN"; then
+    return 0
+  fi
+  if _hl_token_refresh 2>/dev/null; then
+    _HL_BOOK_ERROR=""
+    _hl_book_scan "$bid" "$osis" "$maxch" "$_HL_ACCESS_TOKEN" && return 0
+  fi
+  [[ -n "$_HL_BOOK_ERROR" ]] || _HL_BOOK_ERROR="Could not read highlights. Run: bible hl login"
+  return 1
 }
 
 hl_status() {
-  echo "OAuth configured: $(if _hl_configured; then echo yes; else echo no; fi)"
-  if _hl_read_tokens 2>/dev/null; then
-    echo "Tokens cached:   yes"
+  _hl_config_load
+  if _yvp_key >/dev/null 2>&1; then
+    if [[ -z "$_YVP_KEY_DEFAULT" || "$(_yvp_key)" != "$_YVP_KEY_DEFAULT" ]]; then
+      echo "App Key:          set (also the OAuth client_id)"
+    else
+      echo "App Key:          default (shipped with bible.sh; override in hl config)"
+    fi
   else
-    echo "Tokens cached:   no"
+    echo "App Key:          not set"
+  fi
+  echo "OAuth configured: $(if _hl_configured; then echo yes; else echo no; fi)"
+  if _hl_configured; then
+    echo "Redirect URI:     ${YVP_REDIRECT_URI}"
+  fi
+  [[ -f "$_YVP_HL_CONFIG" ]] && echo "Config file:      $_YVP_HL_CONFIG"
+  if _hl_read_tokens 2>/dev/null; then
+    echo "Tokens cached:    yes"
+    local claims nm em
+    claims=$(_hl_id_claims)
+    if [[ -n "$claims" ]]; then
+      nm=$(printf '%s' "$claims" | jq -r '.name // empty')
+      em=$(printf '%s' "$claims" | jq -r '.email // empty')
+      if [[ -n "$nm" && -n "$em" ]]; then
+        echo "Account:          $nm <$em>"
+      elif [[ -n "$nm" ]]; then
+        echo "Account:          $nm"
+      elif [[ -n "$em" ]]; then
+        echo "Account:          $em"
+      fi
+    fi
+  else
+    echo "Tokens cached:    no"
   fi
 }
 
@@ -2414,7 +2916,7 @@ chapter_text() {
     vnum="${usfm##*.}"
     vtext=$(verse_text "$1" "$usfm")
     if [[ -n "$vtext" ]]; then
-      printf "\n${BOLD}%s${NC} %s\n" "$vnum" "$(echo "$vtext" | fold -w ${width} -s)"
+      printf "\n${BOLD}%s${NC}%s %s\n" "$vnum" "$(_hl_verse_mark "$vnum")" "$(echo "$vtext" | fold -w ${width} -s)"
     fi
   done < <(chapter_usfms "$1" "$2")
 }
@@ -2799,6 +3301,7 @@ listen() {
   # (which has no verse numbers).  When a verse (or range) was given,
   # only the selected verses are shown.
   local local_usfms vstart vend v vtext
+  _hl_chapter_colors "$num" "$bible_book.$chapter"
   local_usfms=$(local_chapter_verses "$bible_book" "$chapter" "$version" 2>/dev/null)
   if [[ -n "$local_usfms" ]]; then
     if [[ -n "$verse" ]]; then
@@ -2806,7 +3309,7 @@ listen() {
       vend="${verse#*-}"
       for (( v=vstart; v<=vend; v++ )); do
         vtext=$(local_verse "$bible_book" "$chapter" "$v" "$version")
-        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC} %s\n" "$v" "$(echo "$vtext" | fold -w ${width} -s)"
+        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
       done
     else
       local_chapter_text "$bible_book" "$chapter" "$version"
@@ -2827,7 +3330,7 @@ listen() {
         vend="${verse#*-}"
         for (( v=vstart; v<=vend; v++ )); do
           vtext=$(verse_text "$listen_text_tmp" "$bible_book.$chapter.$v")
-          [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC} %s\n" "$v" "$(echo "$vtext" | fold -w ${width} -s)"
+          [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
         done
       else
         chapter_text "$listen_text_tmp" "$bible_book.$chapter"
@@ -3190,8 +3693,16 @@ translate() {
 
 usage() {
   cat <<EOF
+bible.sh — the whole Bible in one shell file.
+
+  Run with no arguments for the interactive app: Read (Continue,
+  proverb-a-day, reading plans, the Lord's prayer), Listen (its audio
+  mirror), Search, Compare, Verse of the Day, Translate, Version,
+  Offline and Help. Arrow keys →/← work like [n]ext/[p]rev in every
+  chapter loop; Enter resumes Continue; update hints show in the header.
+
   Arguments            Example usage
-  --help      | -h     Show this help text.
+  --help      | -h     Show this help.
   --bible     | -b     bible -b Isaiah 54:17 KJV
   --search    | -s     bible -s "keyword" KJV
                        Search the YouVersion Platform API first
@@ -3201,42 +3712,40 @@ usage() {
                        KJV database, then the bible.com search page.
   --votd      | -v     bible -v
   proverb              bible proverb
-                       The chapter of Proverbs matching today's date
-                       (menu: Read → "A proverb a day"), with
-                       [r]ead / [l]isten prompt.
-  --saved     | -a     bible saved
-                       Interactive "Are You Saved?" gospel walkthrough —
-                       self-directed: follow the questioning method of
-                       Ray Comfort (Living Waters, Way of the Master)
-                       through the Law, judgment and grace to an answer.
+                       Read today's chapter of Proverbs (31 chapters,
+                       one per day; menu: Read → "A proverb a day").
   --listen    | -l     bible -l Isaiah 54 KJV
   --compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
                        or bible -c Isaiah 54:17 [en|no]
+  --saved     | -a     bible saved
+                       Interactive "Are You Saved?" gospel walkthrough —
+                       self-directed, following the questioning method
+                       of Ray Comfort (Living Waters, Way of the Master).
   --translate | -t     bible -t Matthew 17:21 greek en [google|bing] [brief|full]
                        or bible -t Isaiah 54:17 hebrew en
                        or bible -t John 3:16 auto no
-                       (auto = hebrew for OT, greek for NT.
-                        greek: TR1624, NT only. hebrew: OT only.
-                        engine: google default, bing alternative;
-                        TRANS_ENGINE env also works. Brief clean
-                        output by default; full restores verbose
-                        dictionaries, TRANS_VERBOSE=1 too. Output
-                        is always color-free.)
+                       auto source = hebrew (OT) / greek (NT; TR1624,
+                       NT only); engine default google, else bing
+                       (TRANS_ENGINE works too); brief clean color-free
+                       output by default, full restores dictionaries.
   install              bible install [VERSION] [--all]
-                       Download a version for offline use
-                       (KJV is the only offline version; --all
-                       installs every supported offline version).
+                       Download a version for offline use (KJV is the
+                       only offline version).
   update               bible update [VERSION] [--all]
                        Refresh a locally installed version.
-status               bible status
-                        Show locally installed versions.
+  status               bible status
+                       Show locally installed versions.
+hl | highlights      bible hl login | list | add | rm | status
+                         One-time browser sign-in, then highlight verses.
+                         The menu (g) scans whole books for highlights.
   self-update | -u     bible self-update
-                        Update this script itself from the GitHub repo.
-                        Compares the VERSION header against latest main,
-                        syntax-checks the download, then swaps it in
-                        atomically. SELF_UPDATE_YES=1 skips the prompt.
-  --no-update-check      Launch without checking for updates
-                        (BIBLE_NO_UPDATE_CHECK=1 does the same).
+                       Update this script from the GitHub repo: compares
+                       the VERSION header, syntax-checks the download,
+                       then swaps it in atomically. SELF_UPDATE_YES=1
+                       skips the prompt; launch checks are cached for
+                       SELF_UPDATE_TTL seconds (default 6h).
+  --no-update-check    Launch without checking for updates
+                       (BIBLE_NO_UPDATE_CHECK=1 does the same).
 EOF
 }
 
@@ -3706,6 +4215,9 @@ show_chapter() {
   local osis="$1" ch="$2" ver="$3" dname="${4:-$1}"
   version="$ver"
   version_case
+  # Fetch the highlight colors for this chapter so highlighted verses
+  # get marked inline during the read/listen loop.
+  _hl_chapter_colors "$num" "$osis.$ch"
   # Offline-first: render from the local database when installed.
   if [[ "$ver" == "KJV" ]] && _offline_is_installed "KJV"; then
     local usfms
@@ -3763,6 +4275,129 @@ menu_favorites() {
       return
     fi
   done < "$BIBLE_CACHE/favorites"
+}
+
+_hl_osis_by_name() {
+  # $1 = display name → OSIS code.
+  local e
+  for e in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    if [[ "$(cut -d'|' -f2 <<<"$e")" == "$1" ]]; then
+      cut -d'|' -f1 <<<"$e"
+      return
+    fi
+  done
+}
+
+_hl_pick_book() {
+  # Echo an OSIS code for the book the user picks (empty on abort).
+  local -a books=()
+  local e
+  for e in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    books+=("$(cut -d'|' -f2 <<<"$e")")
+  done
+  local name
+  name=$(pick_from_list "Book:" "${books[@]}")
+  [[ -z "$name" ]] && return 1
+  _hl_osis_by_name "$name"
+}
+
+_hl_browse_book() {
+  # $1=bible_id $2=osis $3=name $4=version — scan every chapter in the
+  # book for highlights, then list the chapters that have some.
+  local bid="$1" osis="$2" name="$3" ver="$4" maxch
+  maxch=$(book_chapters "$osis")
+  [[ -n "$maxch" ]] || { echo "Don't know the chapter count for $name."; pause; return; }
+  echo "Scanning $name ($maxch chapters)…"
+  _hl_book_highlights "$bid" "$osis" "$maxch"
+  if [[ -z "$_HL_BOOK_HIGHLIGHTS" ]]; then
+    if [[ -n "$_HL_BOOK_ERROR" ]]; then
+      echo "$_HL_BOOK_ERROR"
+    else
+      echo "No highlights in $name."
+    fi
+    pause
+    return
+  fi
+  local -a labels=()
+  local pair chN cnt
+  for pair in $_HL_BOOK_HLCOUNT; do
+    chN="${pair%%=*}"; cnt="${pair#*=}"
+    labels+=("$name $chN   ($cnt)")
+  done
+  local entry
+  entry=$(pick_from_list "Highlighted chapters in $name:" "${labels[@]}")
+  [[ -z "$entry" ]] && return
+  local sel="${entry%%   *}"
+  local c="${sel##* }"
+  _hl_browse_chapter "$bid" "$osis" "$name" "$c" "$ver"
+}
+
+_hl_browse_chapter() {
+  # $1=bible_id $2=osis $3=name $4=chapter $5=version. Lists that
+  # chapter's highlighted verses; picking one opens the chapter with
+  # inline highlight markers.
+  local bid="$1" osis="$2" name="$3" ch="$4" ver="$5"
+  _hl_chapter_colors "$bid" "$osis.$ch"
+  if [[ -z "$_HL_CHAPTER_COLORS" ]]; then
+    echo "No highlights in $name $ch."
+    pause
+    return
+  fi
+  local -a labels=()
+  local tok pgid col
+  for tok in $_HL_CHAPTER_COLORS; do
+    pgid="${tok%%=*}"; col="${tok#*=}"
+    labels+=("$osis.$ch.$pgid  ●#${col}")
+  done
+  local entry
+  entry=$(pick_from_list "Highlights in $name $ch:" "${labels[@]}")
+  [[ -z "$entry" ]] && return
+  show_chapter "$osis" "$ch" "$ver" "$name"
+  save_place "$osis|$name|$ch|$ver"
+  pause
+}
+menu_highlights() {
+  # Browse your highlights: pick a book (or the one you're reading) and
+  # scan all its chapters for highlighted verses, or jump straight to the
+  # current chapter's highlights.
+  _hl_read_tokens || {
+    echo "You're not signed in to YouVersion yet."
+    echo "Run: bible hl login   (one-time browser sign-in)"
+    pause
+    return
+  }
+  local osis="" name="" ch="" ver="" bid
+  if [[ -f "$BIBLE_LAST" ]]; then
+    IFS='|' read -r osis name ch ver < "$BIBLE_LAST"
+  fi
+  ver="${ver:-$DEF_VERSION}"
+  version="$ver"; version_case; bid="${num:-1}"
+  if [[ -z "$name" && -n "$osis" ]]; then name=$(osis_name "$osis"); fi
+  local -a picks=()
+  if [[ -n "$osis" ]]; then
+    picks+=("Browse ${name:-$osis} by highlights")
+  fi
+  picks+=("Pick a book…")
+  if [[ -n "$osis" && -n "$ch" ]]; then
+    picks+=("Highlights in ${name:-$osis} $ch")
+  fi
+  local action
+  action=$(pick_from_list "Highlights:" "${picks[@]}")
+  [[ -z "$action" ]] && return
+  case "$action" in
+    "Pick a book…")
+      local bosis bname
+      bosis=$(_hl_pick_book) || return
+      bname=$(osis_name "$bosis")
+      _hl_browse_book "$bid" "$bosis" "$bname" "$ver"
+      ;;
+    "Highlights in "*)
+      _hl_browse_chapter "$bid" "$osis" "$name" "$ch" "$ver"
+      ;;
+    *)
+      _hl_browse_book "$bid" "$osis" "$name" "$ver"
+      ;;
+  esac
 }
 
 # --- Reading plans ----------------------------------------------------
@@ -4183,9 +4818,9 @@ main_menu() {
       actions+=(continue_place)
       labels+=("$item")
     fi
-    keys+=(a r f s m l v t e o h)
-    actions+=(menu_saved menu_read menu_favorites menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
-    labels+=("Are you saved?" "Read" "Favorites" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
+    keys+=(a r f g s m l v t e o h)
+    actions+=(menu_saved menu_read menu_favorites menu_highlights menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
+    labels+=("Are you saved?" "Read" "Favorites" "Highlights" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
     # One compact bar: single keypress, no scrolling. Items wrap at the
     # terminal width (default 80) so long labels never mid-word overflow.
     local w _lab _plain _used
@@ -4256,14 +4891,19 @@ if [[ $# -gt 0 ]]; then
     --no-update-check) BIBLE_NO_UPDATE_CHECK=1; main_menu ;;
     hl|highlights)
       shift
+      _hl_rc=0
       case "${1:-status}" in
         login) shift; hl_login ;;
+        logout) shift; hl_logout ;;
+        config) shift; _hl_configure_prompt; _hl_config_save; echo "Saved to ~/.credentials/.bible_yvp_oauth and ~/.credentials/.bible.com_token." ;;
         approve) shift; hl_approve ;;
-        list) shift; hl_list "${1:-}" ;;
+        list) shift; hl_list "$@" ;;
         add) shift; hl_add "$@" ;;
-        delete|rm) shift; hl_delete "${1:-}" ;;
+        delete|rm) shift; hl_delete "$@" ;;
         *) hl_status ;;
       esac
+      _hl_rc=$?
+      exit "$_hl_rc"
       ;;
     *) usage; exit 1 ;;
   esac
