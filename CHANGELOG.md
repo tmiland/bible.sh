@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 ## Unreleased
 
 ### Added
+- **Full API catalog support**: every version licensed to the app key
+  (1,400+ across all languages) now works with `-b`, `-s`, `-c` and
+  `-l` without hardcoding. `version_case` falls back to the cached
+  Platform API catalog (`~/.cache/bible/catalog.tsv`, TSV of
+  id / localized abbreviation / language tag, refreshed after
+  `_YVP_CATALOG_TTL_MIN`, default 1440 min). New `bible versions [LANG]`
+  lists the catalog, filtered by language tag (`en`, `nb`, …; `no` is
+  accepted as an alias for `nb`). The catalog doubles as the licensing
+  check, replacing the per-language JSON caches.
 - **API search rework**: `--search` (`-s`) searches the YouVersion
   platform **first** (not offline-first) for licensed versions, via
   `/v1/search-verses`, returning a **pickable list of results that
@@ -15,8 +24,8 @@ All notable changes to this project are documented in this file.
   is final (its empty no-match state surfaces "did you mean" /
   "search instead for" hints). Only when the API can't run does search
   fall back to the offline KJV database, then the bible.com search
-  page — and it says so. The licensed-version list is cached for one
-  day (`_YVP_KEY_CACHE_TTL_MIN`, default 1440), so newly licensed
+  page — and it says so. The licensed-version catalog is cached for
+  one day (`_YVP_CATALOG_TTL_MIN`, default 1440), so newly licensed
   versions appear within a day without remapping (lookup falls back to
   an abbreviation match).
 - `bible self-update` (`-u`): fetch the latest `bible.sh` from the
