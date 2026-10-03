@@ -645,11 +645,10 @@ offline_status() {
 
 ## YouVersion Platform API support for bible.sh
 ## Reading and searching through the official Platform API
-## (api.youversion.com) instead of scraping bible.com. Key-gated:
-## nothing changes unless an app key is configured ($YVP_APP_KEY or
-## ~/.credentials/.bible.com_token) AND the requested version is
-## licensed to that key. Callers fall back to their existing
-## scraping paths on any failure.
+## (api.youversion.com). Key-gated: nothing changes unless an app key
+## is configured ($YVP_APP_KEY or ~/.credentials/.bible.com_token) AND
+## the requested version is licensed to that key. Callers fall back to
+## the keyless JSON APIs on any failure.
 
 ## App key: https://developers.youversion.com — 48 chars, sent as the
 ## x-yvp-app-key header (not a secret). Rate-limited: 429 + Retry-After.
@@ -740,7 +739,7 @@ _yvp_bible_id() {
   # this is purely a licensing check against a TTL-cached collection.
   local num="$1" lang="${2:-en}" abbr="${3:-}" cache json
   local id=""
-  _yvp_key >/dev/null 2>&1 || return 1 # no key → caller falls back to scraping
+  _yvp_key >/dev/null 2>&1 || return 1 # no key → caller falls back to the keyless JSON API
   cache="$_YVP_KEY_CACHE-$lang.json"
   if [[ -f "$cache" ]] && [[ -n "$(find "$cache" -mmin -${_YVP_KEY_CACHE_TTL_MIN} 2>/dev/null)" ]]; then
     json=$(<"$cache")
@@ -2857,12 +2856,13 @@ args() {
 
 _yv_chapter_html() {
   # $1 = version id, $2 = USFM reference (e.g. JHN.3).
+  # Keyless fallback for versions not licensed to the Platform API.
   # Echo the chapter markup from the YouVersion chapter JSON API
-  # (no key, no page scraping) and set $page_h1 to the localized
-  # heading ("Johannes 3"). The JSON spans use different class names
-  # than the site, so normalize them to the __verse/__content names
-  # the parsers below expect; numeric entities (&#248;) are decoded
-  # so accented text comes out as plain UTF-8.
+  # (no key required) and set $page_h1 to the localized heading
+  # ("Johannes 3"). The JSON spans use different class names than
+  # the site, so normalize them to the __verse/__content names the
+  # parsers below expect; numeric entities (&#248;) are decoded so
+  # accented text comes out as plain UTF-8.
   local json
   json=$(curl -s \
     --compressed \
@@ -2874,6 +2874,35 @@ _yv_chapter_html() {
     | gsub("class=\"verse v[0-9]+\""; "class=\"verse__verse\"")
     | gsub("class=\"content\""; "class=\"verse__content\"")
     | gsub("&#(?<d>[0-9]+);"; "\(.d|tonumber|[.]|implode)")
+  ' 2>/dev/null
+}
+
+_yvp_chapter_html() {
+  # $1 = Platform API bible id, $2 = USFM reference (e.g. JHN.3).
+  # Echo the chapter markup from the licensed Platform API
+  # (format=html) and set $page_h1 to the localized heading. The API
+  # marks each verse with an empty yv-v span plus a yv-vlbl label
+  # instead of a data-usfm wrapper, so rebuild one __verse/__content
+  # span per verse for the parsers below; tags nested in the text
+  # (words of Jesus) are stripped first so the content span holds
+  # plain text and no inner </span> can truncate extraction.
+  local body
+  body=$(_yvp_api_get "$_YVP_API/bibles/$1/passages/$2?format=html") || return 1
+  page_h1=$(printf '%s' "$body" | jq -r '.reference // empty' 2>/dev/null)
+  printf '%s' "$body" | jq -r --arg prefix "$2." '
+    (.content // empty) as $c
+    | if $c == "" then empty
+      else
+        [ $c | splits("<span class=\"yv-v\" v=\"") ] | .[1:]
+        | map(
+            try (
+              capture("^(?<v>[0-9]+)\"></span><span class=\"yv-vlbl\">[0-9]+</span>(?<t>.*)$"; "s")
+              | .t |= (gsub("<[^>]*>"; "") | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" "))
+              | "<span class=\"verse__verse\" data-usfm=\"\($prefix)\(.v)\"><span class=\"verse__content\">\(.t)</span></span>"
+            ) catch empty
+          )
+        | join("\n")
+      end
   ' 2>/dev/null
 }
 
@@ -3060,9 +3089,8 @@ bible() {
   fi
 
   # API-first: when an app key is set and the requested version is
-  # licensed to it, read via the official Platform API (clean text,
-  # no scraping). Falls back to the chapter-page path below on any
-  # failure — that path stays byte-for-byte untouched as the default.
+  # licensed to it, read via the official Platform API (clean text).
+  # Falls back to the keyless chapter JSON path below on any failure.
   if [[ -z "${BIBLE_ONLINE_ONLY:-}" ]]; then
     local api_id api_usfm api_desc
     if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
@@ -3083,7 +3111,7 @@ bible() {
           chapter_verse+=":$verse"
         fi
         link="https://www.bible.com/bible/$num/$bible_book.$chapter.$verse.$version"
-        # Mirrors the scraping tail: drop the quote wrappers when the
+        # Mirrors the keyless path: drop the quote wrappers when the
         # passage text already carries curly quotes (AMP et al.).
         if [[ $description =~ $BQUOTE ]] || [[ $description =~ $EQUOTE ]]; then
           BQUOTE=''
@@ -3098,7 +3126,7 @@ bible() {
 
   get_bible_chapter "$bible_book" "$chapter" "$version"
 
-  # Chapter pages server-render every verse as <span data-usfm>.
+  # Chapter content marks every verse as <span data-usfm>.
   # First span occurrence wins (later ones are footer/share cards).
   if [ -n "$verse_range" ]
   then
@@ -3212,7 +3240,7 @@ audio_seek() {
 }
 
 listen() {
-  local num= seek_start= seek_end= audio_json audio_title listen_ref
+  local num= seek_start= seek_end= audio_json audio_title listen_ref api_id
   args "$@"
   version_case
   book_case
@@ -3222,7 +3250,7 @@ listen() {
     exit 0
   fi
 
-  # Audio metadata from the YouVersion JSON API (no page scraping):
+  # Audio metadata from the YouVersion JSON API:
   # the default recording's 32k mp3 URL plus its title.
   audio_json=$(curl -s \
     --compressed \
@@ -3245,12 +3273,19 @@ listen() {
     exit 0
   fi
 
-  # Localized reference ("Johannes 3") and chapter markup from the
-  # chapter JSON API; one fetch feeds both the headline and the
-  # numbered text below (see _yv_chapter_html).
+  # Localized reference ("Johannes 3") and chapter markup, one fetch
+  # feeding both the headline and the numbered text below: licensed
+  # Platform API (format=html) when the version is licensed, else the
+  # keyless chapter JSON API (see _yvp_chapter_html/_yv_chapter_html).
   listen_text_tmp=$(mktemp)
   tmp_files+=("$listen_text_tmp")
-  _yv_chapter_html "$num" "$bible_book.$chapter" > "$listen_text_tmp"
+  if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]] \
+     && _yvp_chapter_html "$api_id" "$bible_book.$chapter" > "$listen_text_tmp" \
+     && [[ -s "$listen_text_tmp" ]]; then
+    : # licensed Platform API
+  else
+    _yv_chapter_html "$num" "$bible_book.$chapter" > "$listen_text_tmp"
+  fi
   listen_ref="${page_h1:-$bible_book_name $chapter}"
 
   audio_title=$(printf '%s' "$audio_json" | jq -r '
@@ -3477,7 +3512,7 @@ search() {
   # (its "did you mean" hints are part of the feature set). Only when
   # the API cannot run (no key / not licensed / request failed) do we
   # fall back, first to the local database, then to the bible.com
-  # scraping search.
+  # search.
   local api_id rc api_notice=""
   if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
     if [[ -t 0 || -n "$force_loop" ]]; then
