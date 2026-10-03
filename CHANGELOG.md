@@ -85,6 +85,22 @@ All notable changes to this project are documented in this file.
   in the config wizard either. Override per-user via `YVP_APP_KEY` or
   `bible hl config`.
 
+### Changed
+- **Chapter reads and `--listen` no longer scrape bible.com HTML**: both
+  now use the YouVersion JSON APIs —
+  `bible.youversionapi.com/3.1/chapter.json` for verse text (single
+  verses, ranges and whole chapters from one keyless fetch; verses are
+  located by `<span data-usfm>`), and
+  `audio-bible.youversionapi.com/3.1/chapter.json` for the default
+  recording (mp3 URL + title; the audio is streamed straight from the
+  CDN and the local `~/Audio/Listen Bible` mp3 cache is gone, while
+  `audio_seek` still resolves the verse start). The localized chapter
+  heading ("Johannes 3") now comes from the chapter JSON. Output is
+  byte-identical to the old parser
+  (verified against whole chapters, ranges and accented text); when a
+  chapter has no JSON content the read reports "No result." /
+  "omitted from this version" exactly as before.
+
 ## [1.2.0] - 2026-09-15
 
 ### Added
