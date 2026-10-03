@@ -29,8 +29,8 @@ command away.
   for Read, Search, Compare, Listen, Verse of the Day, Translate,
   Version picker, Offline and Help, plus a dead-simple CLI.
 - **📜 Every version, side by side** — compare *any* translations in
-  one view: `bible -c John 3:16 KJV NIV NLT NKJV ESV`. Or all of them
-  at once with `[en]` / `[no]`.
+  one view: `bible -c John 3:16 KJV NIV NLT NKJV ESV`. Or a preset
+  English/Norwegian list at once with `en` / `no`.
 - **🚫 Offline KJV** — a full, searchable local database (SQLite FTS5).
   No internet? Read on. Scriptures don't need a signal.
 - **⭐ Your highlights, in your terminal** — sign in to YouVersion once,
@@ -38,8 +38,9 @@ command away.
   per chapter (OAuth PKCE, one login, no registration).
 - **✨ A proverb a day** — Proverbs has exactly 31 chapters for the 31 days
   of the month. Read it or listen to it, every day, right where you left off.
-- **📘 Reading plans** — pick a book like *Psalm 65*, and Read and Listen
-  stay in perfect step: `Continue` always resumes your spot, whether you
+- **📘 Reading plans** — pick a starting point like *Psalm 65*, and Read
+  and Listen stay in perfect step: `Continue` always resumes your spot,
+  whether you
   read or heard it last.
 - **🔍 References that just work** — `2 Timoteus 1:2`, `2 Timoteus 1 2`,
   ranges, no-colon, spaces or not — type it the way you think it.
@@ -60,6 +61,7 @@ command away.
 ## 🚀 Install
 
 ```shell
+mkdir -p ~/.scripts
 wget -q https://github.com/tmiland/bible.sh/raw/main/bible.sh -O ~/.scripts/bible.sh
 chmod +x ~/.scripts/bible.sh
 ```
@@ -67,6 +69,7 @@ chmod +x ~/.scripts/bible.sh
 Symlink it into your `PATH` (optional, so you can keep calling it `bible`):
 
 ```shell
+mkdir -p ~/.local/bin
 ln -sfn ~/.scripts/bible.sh ~/.local/bin/bible
 ```
 
@@ -127,10 +130,11 @@ https://www.bible.com/bible/1/ISA.54.17.KJV
 bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
 ```
 
-…or the shortcut for all English/Norwegian versions:
+…or a preset English/Norwegian list:
 
 ```shell
-bible -c Isaiah 54:17 [en|no]
+bible -c Isaiah 54:17 en
+bible -c Isaiah 54:17 no
 ```
 
 …or store versions in a variable:
@@ -168,7 +172,7 @@ bible -b 2Timoteus 1 2         # no space, no colon
 bible -b 2 Timoteus 1:2        # with space, colon
 bible -b 2Timoteus 1:2         # no space, colon
 bible -b "2 Timoteus 1 2"      # whole reference as one quoted token
-bible -b Psalm 23 3            # chapter only
+bible -b Psalm 23 3            # book without a number
 bible -b 1 Corinthians 13 4-6  # verse range, no colon
 ```
 
@@ -221,8 +225,8 @@ Data lives in `~/.cache/bible/`:
 Text source: [github.com/aruljohn/Bible-kjv](https://github.com/aruljohn/Bible-kjv)
 (public domain). Set `BIBLE_ONLINE_ONLY=1` to force bible.com lookups
 even for an installed version; `bible install --all` installs every
-supported offline version. Other versions (NIV, NORSK, …) and VOTD /
-Translate remain online-only.
+offline version (currently just KJV). Other versions (NIV, NORSK, …)
+and VOTD / Translate remain online-only.
 
 ---
 
@@ -239,14 +243,14 @@ header, runs a bash syntax check on the download and then swaps the new
 file in atomically. It asks before overwriting; set `SELF_UPDATE_YES=1`
 for unattended upgrades. If the installed copy isn't writable it falls
 back to printing the one-line `curl` install command. The updater block
-is self-contained and sets `SELF_UPDATE_URL` to another repo/file to
+is self-contained; set `SELF_UPDATE_URL` to another repo/file to
 reuse it in any other script.
 
 **On launch** the app silently compares against the latest version and,
 when a newer one exists, shows it in the header:
 
 ```shell
-Update available: v1.2.0 → v1.3.0 — run: bible self-update (or -u)
+Update available: v1.2.0 → v1.3.0  run: bible self-update (or -u)
 ```
 
 The remote version is cached in `~/.cache/bible/self-version` and only
@@ -263,8 +267,8 @@ the app picks the chapter matching today's date. **Read** reads it
 (also `bible proverb`); **Listen** plays it:
 
 ```shell
-Read → "A proverb a day"      # shows Proverbs 15
-Listen → "A proverb a day"    # plays Proverbs 15 audio + verses
+Read → "A proverb a day"      # reads today's chapter
+Listen → "A proverb a day"    # plays it as audio + verses
 ```
 
 Reading records it as your reading spot (Continue picks it up); either
@@ -287,7 +291,7 @@ are split cleanly:
 
 - Both open with **`Continue reading plan: Psalm 66`** — straight back
   into your most recent plan, read or listened as appropriate.
-- **Read** shows plans for reading; move on with `[n]ext` / `[p]prev`
+- **Read** shows plans for reading; move on with `[n]ext` / `[p]rev`
   (or the `→` / `←` arrow keys), stop anywhere.
 - **Listen** mirrors the same list for audio; each chapter plays and
   offers the same forward/back (then quits).
@@ -309,8 +313,8 @@ line per book).
 Read and search your *licensed* versions through `api.youversion.com`
 — faster, richer search metadata, and the same verses you already get.
 Active when an app key is configured and the requested version is
-licensed; otherwise everything falls back to the regular scraping
-paths.
+licensed; otherwise everything falls back to the keyless JSON
+endpoints.
 
 **Every version in the API catalog works** — 1,400+ across all
 languages, not just the hardcoded English/Norwegian ones. `bible
@@ -321,11 +325,13 @@ can be used directly:
 ```shell
 bible versions          # all versions: "ID  ABBR  LANG"
 bible versions nb       # only Norwegian
-bible -b John 3:16 KUD  # read Cebuano, no configuration needed
+bible -b John 3:16 APD  # read Cebuano, no configuration needed
 ```
 
 The catalog is cached for a day (`~/.cache/bible/catalog.tsv`), so
 newly licensed versions appear within a day without a script update.
+
+---
 
 ## ⭐ Highlights — your verses, in your terminal
 
@@ -338,7 +344,8 @@ Run one command, approve it in your browser, and you're in:
 ```shell
 bible hl login          # one-time sign-in — that's it
 bible hl status         # see your config, token and signed-in account
-bible hl list JHN.3     # highlight colors of John 3 (current chapter by default)
+bible hl list           # highlights in your last-read chapter
+bible hl list JHN.3     # ...or any chapter you name
 bible hl add JHN.3.16   # highlight a verse (pick a color: bible hl add JHN.3.16 44aa44)
 bible hl rm  JHN.3.16   # clear the highlight on that verse
 ```
@@ -365,12 +372,6 @@ client_id (XOR-masked in the source so it never sits in plaintext, and
 safe to share — it's not a secret) plus a default Redirect URI of
 `http://localhost:8080/oauth` that matches the registered callback
 exactly, so the approval flow just works.
-
-Prefer your **own** Platform app? Fully optional: override the App Key
-via `YVP_APP_KEY` or `bible hl config` (saved to
-`~/.credentials/.bible.com_token`) and set your Redirect URI to whatever
-you registered — it must match your app's callback exactly, and it never
-has to load. `YVP_APP_KEY` / `YVP_REDIRECT_URI` env vars always win.
 
 Prefer your **own** Platform app? Fully optional: override the App Key
 via `YVP_APP_KEY` or `bible hl config` (saved to
@@ -409,7 +410,7 @@ Or source auto-detected (hebrew for OT, greek for NT):
 
 ```shell
 bible -t John 3:16 auto no
-bible -t Matthew 17:21 greek en [google|bing] [brief|full]
+bible -t Matthew 17:21 greek en bing full  # engine + output are optional
 ```
 
 Engines with working free endpoints are google (default) and bing;
