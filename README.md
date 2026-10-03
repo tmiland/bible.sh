@@ -119,6 +119,7 @@ https://www.bible.com/bible/1/ISA.54.17.KJV
 | `install` | `bible install [VERSION] [--all]` |
 | `update` | `bible update [VERSION] [--all]` |
 | `status` | `bible status` |
+| `versions` | `bible versions [LANG]` |
 
 ### 🔀 Compare versions
 
@@ -310,6 +311,21 @@ Read and search your *licensed* versions through `api.youversion.com`
 Active when an app key is configured and the requested version is
 licensed; otherwise everything falls back to the regular scraping
 paths.
+
+**Every version in the API catalog works** — 1,400+ across all
+languages, not just the hardcoded English/Norwegian ones. `bible
+versions` lists them (`bible versions nb` filters by language tag;
+`no` works as an alias for `nb`), and any abbreviation from that list
+can be used directly:
+
+```shell
+bible versions          # all versions: "ID  ABBR  LANG"
+bible versions nb       # only Norwegian
+bible -b John 3:16 KUD  # read Cebuano, no configuration needed
+```
+
+The catalog is cached for a day (`~/.cache/bible/catalog.tsv`), so
+newly licensed versions appear within a day without a script update.
 
 ## ⭐ Highlights — your verses, in your terminal
 

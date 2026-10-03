@@ -656,11 +656,13 @@ offline_status() {
 _YVP_API="${YVP_API_BASE:-https://api.youversion.com}/v1"
 _YVP_KEY_FILE="$HOME/.credentials/.bible.com_token"
 BIBLE_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}"
-_YVP_KEY_CACHE="$BIBLE_CACHE/bibles"
-# How long the licensed-version list stays fresh before being re-checked
-# against the API (minutes). 1440 = 1 day, so a newly licensed version
-# becomes searchable within a day, no manual remapping needed.
-_YVP_KEY_CACHE_TTL_MIN="${_YVP_KEY_CACHE_TTL_MIN:-1440}"
+# Full Platform API version catalog, cached as TSV rows of
+# id<TAB>localized_abbreviation<TAB>language_tag (see _yvp_catalog).
+_YVP_CATALOG_CACHE="$BIBLE_CACHE/catalog.tsv"
+# How long the catalog stays fresh before being re-checked against the
+# API (minutes). 1440 = 1 day, so a newly licensed version becomes
+# readable/searchable within a day, no manual remapping needed.
+_YVP_CATALOG_TTL_MIN="${_YVP_CATALOG_TTL_MIN:-1440}"
 # Last /v1/search-verses response (raw JSON) plus parsed metadata for
 # the search pager: _YVP_SEARCH_QUERY (the query it answered),
 # _YVP_SEARCH_NEXT (pagination token, empty = no more results),
@@ -719,7 +721,7 @@ _yvp_api_get() {
     sleep "${retry:-2}"
     tmp=$(mktemp)
     hdr=$(mktemp)
-code=$(curl -s -m 20 -w '%{http_code}' -D "$hdr" -o "$tmp" -H "x-yvp-app-key: $(_yvp_key)" "$url" "$@")
+    code=$(curl -s -m 20 -w '%{http_code}' -D "$hdr" -o "$tmp" -H "x-yvp-app-key: $(_yvp_key)" "$url" "$@")
     if [[ "$code" == "200" ]]; then
       cat "$tmp"
       rm -f "$tmp" "$hdr"
@@ -730,39 +732,118 @@ code=$(curl -s -m 20 -w '%{http_code}' -D "$hdr" -o "$tmp" -H "x-yvp-app-key: $(
   return 1
 }
 
-_yvp_bible_id() {
-  # $1 = web version id (version_case num), $2 = lang (en),
-  # $3 = version abbreviation (fallback when $1 is empty or unmapped).
-  # Echo the Platform API bible id when that version is licensed to
-  # the configured key, else non-zero. The API reuses the same
-  # canonical ids as bible.com (NIV11=111, AMP=1588, GNV=2163), so
-  # this is purely a licensing check against a TTL-cached collection.
-  local num="$1" lang="${2:-en}" abbr="${3:-}" cache json
-  local id=""
-  _yvp_key >/dev/null 2>&1 || return 1 # no key → caller falls back to the keyless JSON API
-  cache="$_YVP_KEY_CACHE-$lang.json"
-  if [[ -f "$cache" ]] && [[ -n "$(find "$cache" -mmin -${_YVP_KEY_CACHE_TTL_MIN} 2>/dev/null)" ]]; then
-    json=$(<"$cache")
-  elif json=$(_yvp_api_get "$_YVP_API/bibles?language_ranges[]=$lang&fields[]=id&fields[]=abbreviation&page_size=*"); then
-    mkdir -p "$BIBLE_CACHE"
-    printf '%s' "$json" > "$cache"
-  elif [[ -f "$cache" ]]; then
-    json=$(<"$cache") # stale cache beats an empty response
-  else
-    return 1
+_yvp_catalog() {
+  # Echo the full Platform API version catalog as TSV rows of
+  # id<TAB>localized_abbreviation<TAB>language_tag, refreshing the
+  # cache when it is older than $_YVP_CATALOG_TTL_MIN. Non-zero when
+  # no key is set, the API fails and there is no cache, or the
+  # response carries no rows. Every version in this catalog is
+  # licensed to the key, so it doubles as the licensing check the
+  # callers used to make per language.
+  local json rows
+  _yvp_key >/dev/null 2>&1 || return 1
+  if [[ -s "$_YVP_CATALOG_CACHE" ]] \
+     && [[ -n "$(find "$_YVP_CATALOG_CACHE" -mmin -"$_YVP_CATALOG_TTL_MIN" 2>/dev/null)" ]]; then
+    cat "$_YVP_CATALOG_CACHE"
+    return 0
   fi
+  if json=$(_yvp_api_get "$_YVP_API/bibles?language_ranges[]=*&fields[]=id&fields[]=localized_abbreviation&fields[]=language_tag&page_size=*"); then
+    rows=$(printf '%s' "$json" | jq -r \
+      '.data[]? | [(.id|tostring), (.localized_abbreviation // ""), (.language_tag // "")] | @tsv' 2>/dev/null)
+    if [[ -n "$rows" ]]; then
+      mkdir -p "$BIBLE_CACHE"
+      printf '%s\n' "$rows" > "$_YVP_CATALOG_CACHE"
+      printf '%s\n' "$rows"
+      return 0
+    fi
+  fi
+  [[ -s "$_YVP_CATALOG_CACHE" ]] || return 1
+  cat "$_YVP_CATALOG_CACHE" # stale cache beats no catalog
+}
+
+declare -A _YVP_CATALOG_BY_ABBR=()
+declare -A _YVP_CATALOG_BY_ID=()
+_YVP_CATALOG_LOADED=""
+
+_yvp_catalog_load() {
+  # Populate the in-process lookup maps from the cached catalog:
+  # _YVP_CATALOG_BY_ABBR (uppercased abbreviation → TSV row) and
+  # _YVP_CATALOG_BY_ID (id → TSV row). Loaded once per process.
+  [[ -n "$_YVP_CATALOG_LOADED" ]] && return 0
+  local tsv id abbr ltag row
+  tsv=$(_yvp_catalog) || return 1
+  while IFS=$'\t' read -r id abbr ltag; do
+    [[ -n "$id" && -n "$abbr" ]] || continue
+    row="$id"$'\t'"$abbr"$'\t'"$ltag"
+    # First row wins on collisions (the catalog leads with the
+    # primary/English editions).
+    [[ -n "${_YVP_CATALOG_BY_ABBR[${abbr^^}]:-}" ]] || _YVP_CATALOG_BY_ABBR["${abbr^^}"]="$row"
+    [[ -n "${_YVP_CATALOG_BY_ID[$id]:-}" ]] || _YVP_CATALOG_BY_ID["$id"]="$row"
+  done <<< "$tsv"
+  _YVP_CATALOG_LOADED=1
+}
+
+_yvp_version_row() {
+  # $1 = version abbreviation, any case. Echo the catalog row
+  # (id<TAB>abbr<TAB>lang) for it, else non-zero.
+  _yvp_catalog_load || return 1
+  local row="${_YVP_CATALOG_BY_ABBR[${1^^}]:-}"
+  [[ -n "$row" ]] || return 1
+  printf '%s' "$row"
+}
+
+_yvp_bible_id() {
+  # $1 = web version id (version_case num), $3 = version abbreviation
+  # (fallback when $1 is empty or unmapped). $2 (language) is unused
+  # since the catalog lookup is language-independent; callers still
+  # pass it so the signature stays stable.
+  # Echo the Platform API bible id when that version is in the
+  # catalog, else non-zero. The API reuses the same canonical ids as
+  # bible.com (NIV=111, AMP=1588, GNV=2163), so this is purely a
+  # catalog/licensing check against a TTL-cached list.
+  local num="$1" abbr="${3:-}" row=""
+  _yvp_catalog_load || return 1
   if [[ -n "$num" ]]; then
-    id=$(printf '%s' "$json" | jq -r --arg n "$num" \
-      '[.data[]? | select((.id|tostring)==$n) | .id][0] // empty' 2>/dev/null)
+    row="${_YVP_CATALOG_BY_ID[$num]:-}"
   fi
   # Fallback: match the version abbreviation case-insensitively so a
   # newly licensed version works even before version_case maps it.
-  if [[ -z "$id" && -n "$abbr" ]]; then
-    id=$(printf '%s' "$json" | jq -r --arg a "${abbr^^}" \
-      '[.data[]? | select((.abbreviation|ascii_upcase)==$a) | .id][0] // empty' 2>/dev/null)
+  if [[ -z "$row" && -n "$abbr" ]]; then
+    row="${_YVP_CATALOG_BY_ABBR[${abbr^^}]:-}"
   fi
-  [[ -n "$id" ]] || return 1
-  printf '%s' "$id"
+  [[ -n "$row" ]] || return 1
+  printf '%s' "${row%%$'\t'*}"
+}
+
+versions() {
+  # List the Platform API version catalog: versions [LANG]
+  # LANG filters by language tag (en, nb, ...); "no" is accepted as
+  # an alias for "nb". One "ID  ABBR  LANG" line per version, so it
+  # pipes cleanly into grep/less.
+  local lang="${1:-}" tsv rows count=0 shown
+  tsv=$(_yvp_catalog) || {
+    printf 'versions: no version catalog available - set a YouVersion app key and retry.\n' >&2
+    return 1
+  }
+  if [[ -n "$lang" ]]; then
+    shown="${lang,,}"
+    rows=$(printf '%s\n' "$tsv" | awk -F'\t' -v l="$shown" 'tolower($3)==l')
+    if [[ -z "$rows" && "$shown" == "no" ]]; then
+      shown=nb
+      rows=$(printf '%s\n' "$tsv" | awk -F'\t' -v l="$shown" 'tolower($3)==l')
+    fi
+    if [[ -z "$rows" ]]; then
+      printf 'versions: no versions for language "%s".\n' "$lang" >&2
+      return 1
+    fi
+  else
+    rows="$tsv"
+  fi
+  count=$(printf '%s\n' "$rows" | wc -l)
+  printf '%s\n' "$rows" | sort -t$'\t' -k3,3 -k2,2 | awk -F'\t' \
+    '{ printf "%-6s %-18s %s\n", $1, $2, $3 }'
+  [[ -t 1 ]] && printf '%s versions%s\n' "$count" "$([[ -n "$lang" ]] && printf ' for %s' "$shown")" >&2
+  return 0
 }
 
 _yvp_suggest_live() {
@@ -2265,6 +2346,10 @@ divider_line() {
 }
 
 version_case() {
+  # num/lang are outputs; clear them so an unmapped version cannot
+  # silently reuse a mapping left over from an earlier call.
+  num=""
+  lang=""
   case "$version" in
     B2024BM)
       num=4779
@@ -2419,6 +2504,22 @@ version_case() {
       lang=heb
       ;;
   esac
+
+  # Everything else in the Platform API catalog (1,400+ versions)
+  # resolves dynamically: the cached catalog supplies the id and
+  # language tag, and its canonical abbreviation replaces the user's
+  # token for display and cache keys. Runs only when the case block
+  # above did not match, so the curated mappings stay authoritative.
+  if [[ -z "$num" && -n "$version" ]]; then
+    local row cid cabbr clang
+    row=$(_yvp_version_row "$version" 2>/dev/null) || row=""
+    if [[ -n "$row" ]]; then
+      IFS=$'\t' read -r cid cabbr clang <<< "$row"
+      num="$cid"
+      lang="$clang"
+      version="$cabbr"
+    fi
+  fi
 }
 
 book_case() {
@@ -3764,6 +3865,13 @@ bible.sh — the whole Bible in one shell file.
                        Refresh a locally installed version.
   status               bible status
                        Show locally installed versions.
+  versions             bible versions [LANG]
+                       List every version in the YouVersion Platform
+                       API catalog, one "ID ABBR LANG" line each.
+                       LANG filters by language tag (en, nb, ...;
+                       "no" works too). Any catalog version can be
+                       read/searched by abbreviation, e.g.
+                       bible -b John 3:16 KUD
 hl | highlights      bible hl login | list | add | rm | status
                          One-time browser sign-in, then highlight verses.
                          The menu (g) scans whole books for highlights.
@@ -4916,6 +5024,7 @@ if [[ $# -gt 0 ]]; then
     install) shift; install_version "${1:-KJV}" "${2:-}" ;;
     update) shift; update_version "${1:-KJV}" "${2:-}" ;;
     status) offline_status ;;
+    versions | --versions) shift; versions "${1:-}"; exit $? ;;
     self-update | selfupdate | -u | --update | upgrade) shift; self_update ;;
     --no-update-check) BIBLE_NO_UPDATE_CHECK=1; main_menu ;;
     hl|highlights)
