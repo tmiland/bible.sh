@@ -93,6 +93,10 @@ All notable changes to this project are documented in this file.
   the browser — no Platform app registration needed. The key never appears
   in the config wizard either. Override per-user via `YVP_APP_KEY` or
   `bible hl config`.
+- **Offline uninstall**: `bible uninstall [VERSION] [-y|--yes] [--all]`
+  (menu: Offline Bible → Uninstall KJV) removes the offline database/JSON
+  and any leftover raw downloads. Reading then falls back to the keyless
+  YouVersion JSON API and search to the bible.com search page.
 
 ### Changed
 - **Chapter reads and `--listen` no longer scrape bible.com HTML**: both

@@ -253,6 +253,65 @@ _install_all_versions() {
   install_version "KJV"
 }
 
+uninstall_version() {
+  # $1 = version code (default KJV); -y/--yes skips the confirmation,
+  # --all removes every supported offline version. After this, reading
+  # falls back to the keyless YouVersion JSON API and search to the
+  # bible.com search page.
+  local ver="" assume_yes=false do_all=false arg
+  for arg in "$@"; do
+    case "$arg" in
+      -y | --yes) assume_yes=true ;;
+      --all) do_all=true ;;
+      -h | --help)
+        echo "Usage: bible uninstall [VERSION] [-y|--yes] [--all]"
+        return 0
+        ;;
+      "") ;;
+      *) ver="${arg^^}" ;;
+    esac
+  done
+
+  local -a versions=()
+  if [[ "$do_all" == true ]]; then
+    versions=("${_OFFLINE_SUPPORTED_VERSIONS[@]}")
+  else
+    versions=("${ver:-KJV}")
+  fi
+
+  local v db json raw
+  local -a files=()
+  for v in "${versions[@]}"; do
+    db="$(_offline_db "$v")"
+    json="$(_offline_json "$v")"
+    [[ -f "$db" ]] && files+=("$db")
+    [[ -f "$json" ]] && files+=("$json")
+    # Leftover raw/partial downloads from older builds.
+    for raw in "$BIBLE_CACHE/RAW-${v}"*.json "$BIBLE_CACHE/${v}"*.tmp; do
+      [[ -f "$raw" ]] && files+=("$raw")
+    done
+  done
+
+  if (( ${#files[@]} == 0 )); then
+    echo "Nothing to uninstall: ${versions[*]} is not installed offline."
+    return 1
+  fi
+
+  if [[ "$assume_yes" != true ]]; then
+    echo "The following offline files will be removed:"
+    printf '  %s\n' "${files[@]}"
+    printf 'Remove them? [y/N] '
+    local answer=""
+    read -r answer || answer=""
+    [[ "$answer" == [yY]* ]] || { echo "Aborted."; return 1; }
+  fi
+
+  rm -f -- "${files[@]}"
+  echo "Uninstalled offline: ${versions[*]}."
+  echo "Reading now falls back to the online YouVersion JSON API;"
+  echo "search falls back to the bible.com search page."
+}
+
 _fetch_and_build() {
   local ver="$1"
   mkdir -p "$BIBLE_CACHE"
@@ -635,6 +694,7 @@ offline_status() {
 
   echo ""
   echo "Storage backend: $([ "$_has_sqlite3" == true ] && echo "SQLite" || echo "JSON (install sqlite3 for faster search)")"
+  echo "Manage: bible install | bible update | bible uninstall [VERSION]"
   divider_line
 }
 
@@ -3879,6 +3939,10 @@ bible.sh — the whole Bible in one shell file.
                        only offline version).
   update               bible update [VERSION] [--all]
                        Refresh a locally installed version.
+  uninstall            bible uninstall [VERSION] [-y|--yes] [--all]
+                       Remove a locally installed version. Reading
+                       then falls back to the online JSON API and
+                       search to the bible.com search page.
   status               bible status
                        Show locally installed versions.
   versions             bible versions [LANG]
@@ -4758,10 +4822,11 @@ menu_offline() {
   offline_status
   echo ""
   if _offline_is_installed "KJV"; then
-    choice=$(pick_from_list "Offline Bible:" "Update KJV" "Reinstall KJV")
+    choice=$(pick_from_list "Offline Bible:" "Update KJV" "Reinstall KJV" "Uninstall KJV")
     case "$choice" in
       "Update KJV") update_version "KJV"; pause ;;
       "Reinstall KJV") _fetch_and_build "KJV"; pause ;;
+      "Uninstall KJV") uninstall_version "KJV"; pause ;;
     esac
   else
     choice=$(pick_from_list "Offline Bible:" "Install KJV (offline read/search)")
@@ -5081,6 +5146,7 @@ if [[ $# -gt 0 ]]; then
     proverb) menu_proverb ;;
     install) shift; install_version "${1:-KJV}" "${2:-}" ;;
     update) shift; update_version "${1:-KJV}" "${2:-}" ;;
+    uninstall | remove) shift; uninstall_version "$@"; exit $? ;;
     status) offline_status ;;
     versions | --versions) shift; versions "${1:-}"; exit $? ;;
     self-update | selfupdate | -u | --update | upgrade) shift; self_update ;;
