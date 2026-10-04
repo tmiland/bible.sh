@@ -985,7 +985,9 @@ _keyword_prompt() {
     else
       printf '\n\r\033[2K' >&2
     fi
-    printf '\033[1A\r' >&2
+    # Park the cursor right after the typed text (the line is redrawn
+    # as "Keywords: " + one space + buffer).
+    printf '\033[1A\033[%dG' "$(( ${#buf} + 11 ))" >&2
     if ! IFS= read -rsN1 -t 0.35 k </dev/tty; then
       # Pause in typing: refresh the suggestion line once per prefix.
       if [[ "$buf" == "${sug_last:-}" ]]; then continue; fi
@@ -1205,7 +1207,7 @@ _yvp_search_open() {
   local ref="$1" ver="$2" name="${3:-}"
   local osis="${ref%%.*}" cv="${ref#*.}"
   local ch="${cv%%.*}"
-  show_chapter "$osis" "$ch" "$ver" "${name:-$osis}"
+  show_chapter "$osis" "$ch" "$ver" "${name:-$osis}" || return 1
   save_place "$osis|${name:-$osis}|$ch|$ver"
 }
 
@@ -3090,7 +3092,7 @@ get_bible_chapter() {
   # compatibility but the version is already in $num.
   if ! command -v jq >/dev/null 2>&1; then
     echo "jq not installed..."
-    exit 0
+    return 1
   fi
   tmp=$(mktemp)
   tmp_files+=("$tmp")
@@ -3098,7 +3100,7 @@ get_bible_chapter() {
   if [[ ! -s "$tmp" ]]; then
     echo "No result."
     echo
-    exit 0
+    return 1
   fi
 }
 
@@ -3166,7 +3168,7 @@ output_correction() {
     fi
     echo "No result."
     echo
-    exit 0
+    return 1
   fi
 }
 
@@ -3301,7 +3303,7 @@ bible() {
     fi
   fi
 
-  get_bible_chapter "$bible_book" "$chapter" "$version"
+  get_bible_chapter "$bible_book" "$chapter" "$version" || return 1
 
   # Chapter content marks every verse as <span data-usfm>.
   # First span occurrence wins (later ones are footer/share cards).
@@ -3424,7 +3426,7 @@ listen() {
 
   if ! command -v jq >/dev/null 2>&1; then
     echo "jq not installed..."
-    exit 0
+    return 1
   fi
 
   # Audio metadata from the YouVersion JSON API:
@@ -3796,7 +3798,7 @@ votd() {
   curl -s "$votd_json_url" > "$votd_tmp" 2>/dev/null
   if [[ ! $(command -v 'jq') ]]; then
     echo "jq not installed..."
-    exit 0
+    return 1
   fi
   # Parse the VOTD response (bible.com sends it in .response.data.arrayOfVerses)
   votd_content=$(jq -r '.response.data.arrayOfVerses[0].verses[0].content // empty' "$votd_tmp" | tr '\n' ' ')
@@ -3855,7 +3857,7 @@ votd() {
   version=$votd_version
   link=https://www.bible.com$votd_url
   # Display output
-  output_correction
+  output_correction || return 1
   output "$description" "$book" "$chapter_verse" "$version" "$link"
   # Notifications (skipped for text-only home use)
   if [[ -z "${VOTD_TEXT:-}" ]]
@@ -3983,6 +3985,10 @@ search() {
         | grep -Po "mbe-1\">\K(.*?)</p>" | sed "s|</p>||g" \
         | fold -w ${width} -s
     )
+    # bible.com streams some result cards as React placeholders
+    # (Loading…); they parse with an empty description. Skip them
+    # instead of letting output_correction print a false "No result."
+    [[ -z "$description" ]] && continue
     chapter_verse=$(
       echo "$search_results" \
         | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | sed "s|<\!--||g"
@@ -4003,7 +4009,7 @@ search() {
     )
     link="https://www.bible.com$link"
     # Display output
-    output_correction
+    output_correction || continue
     output "$description" "$book" "$chapter_verse" "$version" "$link"
     divider_line
     # Delete tmp file
@@ -4674,7 +4680,7 @@ show_chapter() {
       return
     fi
   fi
-  get_bible_chapter "$osis" "$ch" "$ver"
+  get_bible_chapter "$osis" "$ch" "$ver" || return 1
   chapter_text "$tmp" "$osis.$ch"
   printf "\n${GREEN}%s %s${NC} - ${YELLOW}(%s)${NC}\n" "$dname" "$ch" "$ver"
   printf "${BLUE}https://www.bible.com/bible/%s/%s.%s.%s${NC}\n\n" "$num" "$osis" "$ch" "$ver"
