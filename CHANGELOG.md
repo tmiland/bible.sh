@@ -97,6 +97,14 @@ All notable changes to this project are documented in this file.
   (menu: Offline Bible → Uninstall KJV) removes the offline database/JSON
   and any leftover raw downloads. Reading then falls back to the keyless
   YouVersion JSON API and search to the bible.com search page.
+- **VOTD delivery**: `bible votd install [HH:MM] [VERSION]` installs a
+  daily cronjob (default 07:00; log `~/.cache/bible/votd-cron.log`),
+  `bible votd status` shows cronjob + Telegram state, and
+  `bible votd remove` removes it. Optional Telegram delivery
+  (`bible votd telegram setup|test|on|off`) reuses the `telegram.bot`
+  sender from space-weather-alerts; settings live in
+  `~/.credentials/.bible_votd` (0600). The interactive Verse of the Day
+  menu exposes both via `c` (cronjob) and `t` (Telegram).
 
 ### Changed
 - **Chapter reads and `--listen` no longer scrape bible.com HTML**: both

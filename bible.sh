@@ -3551,6 +3551,225 @@ listen() {
   printf "\n"
 }
 
+# --- VOTD schedule and Telegram notifications ------------------------
+# Daily VOTD cronjob plus Telegram delivery. Settings live in
+# ~/.credentials/.bible_votd (0600); telegram.bot is the same sender
+# used by ~/.github/Space-Weather-Alerts.
+_VOTD_CONFIG="$HOME/.credentials/.bible_votd"
+_VOTD_CRON_TAG="# bible.sh-votd"
+
+votd_config_load() {
+  VOTD_CRON_TIME="${VOTD_CRON_TIME:-}"
+  VOTD_CRON_VERSION="${VOTD_CRON_VERSION:-}"
+  VOTD_TELEGRAM="${VOTD_TELEGRAM:-off}"
+  TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+  TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+  if [[ -r "$_VOTD_CONFIG" ]]; then
+    # shellcheck disable=SC1090
+    source "$_VOTD_CONFIG"
+  fi
+}
+
+votd_config_save() {
+  mkdir -p "$(dirname "$_VOTD_CONFIG")"
+  chmod 700 "$(dirname "$_VOTD_CONFIG")" 2>/dev/null || true
+  {
+    printf 'VOTD_CRON_TIME=%q\n' "${VOTD_CRON_TIME:-}"
+    printf 'VOTD_CRON_VERSION=%q\n' "${VOTD_CRON_VERSION:-}"
+    printf 'VOTD_TELEGRAM=%q\n' "${VOTD_TELEGRAM:-off}"
+    printf 'TELEGRAM_BOT_TOKEN=%q\n' "${TELEGRAM_BOT_TOKEN:-}"
+    printf 'TELEGRAM_CHAT_ID=%q\n' "${TELEGRAM_CHAT_ID:-}"
+  } > "$_VOTD_CONFIG.tmp" \
+    && chmod 600 "$_VOTD_CONFIG.tmp" \
+    && mv "$_VOTD_CONFIG.tmp" "$_VOTD_CONFIG"
+}
+
+votd_telegram_enabled() {
+  [[ "${VOTD_TELEGRAM:-off}" == "on" ]] \
+    && [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] \
+    && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]
+}
+
+votd_telegram_send() {
+  # $1 = title, $2 = text. Returns non-zero when sending fails.
+  votd_telegram_enabled || return 1
+  command -v telegram.bot >/dev/null 2>&1 || return 1
+  telegram.bot --bottoken "$TELEGRAM_BOT_TOKEN" --chatid "$TELEGRAM_CHAT_ID" \
+    --silent --title "$1" --text "$2" >/dev/null 2>&1
+}
+
+votd_telegram_install() {
+  local dir url
+  dir=$(mktemp -d)
+  url="https://github.com/beep-projects/telegram.bot/releases/latest/download/telegram.bot"
+  echo "Downloading telegram.bot..."
+  if wget -q "$url" -O "$dir/telegram.bot" || curl -fsSL "$url" -o "$dir/telegram.bot"; then
+    chmod 755 "$dir/telegram.bot"
+    ( cd "$dir" && sudo ./telegram.bot --install )
+  else
+    echo "Download failed — see https://github.com/beep-projects/telegram.bot" >&2
+    rm -rf "$dir"
+    return 1
+  fi
+  rm -rf "$dir"
+  command -v telegram.bot >/dev/null 2>&1
+}
+
+votd_telegram_setup() {
+  votd_config_load
+  local token chat answer
+  if ! command -v telegram.bot >/dev/null 2>&1; then
+    echo "telegram.bot is not installed (the sender Space-Weather-Alerts uses)."
+    read -rp "Install it now? [y/N]: " answer </dev/tty
+    if [[ "${answer,,}" == "y" ]]; then
+      votd_telegram_install || { echo "telegram.bot is still missing." >&2; return 1; }
+    else
+      return 1
+    fi
+  fi
+  echo "Create a bot with @BotFather, then send it a message (e.g. /start)."
+  read -rp "Bot token [${TELEGRAM_BOT_TOKEN:+keep current}]: " token </dev/tty
+  token="${token:-$TELEGRAM_BOT_TOKEN}"
+  if [[ -z "$token" ]]; then
+    echo "No bot token given." >&2
+    return 1
+  fi
+  read -rp "Chat id (see 'telegram.bot --get_chatid --bottoken <token>') [${TELEGRAM_CHAT_ID:-}]: " chat </dev/tty
+  chat="${chat:-$TELEGRAM_CHAT_ID}"
+  if [[ -z "$chat" ]]; then
+    echo "No chat id given." >&2
+    return 1
+  fi
+  TELEGRAM_BOT_TOKEN="$token"
+  TELEGRAM_CHAT_ID="$chat"
+  VOTD_TELEGRAM=on
+  votd_config_save
+  echo "Saved to ~/.credentials/.bible_votd"
+  echo "Sending a test message..."
+  if votd_telegram_send "Verse of the Day" "Telegram notifications are set up."; then
+    echo "Test message sent."
+  else
+    echo "Test message failed — check the token and chat id." >&2
+  fi
+}
+
+votd_telegram_test() {
+  votd_config_load
+  if ! votd_telegram_enabled; then
+    echo "Telegram is not enabled — run: bible votd telegram setup" >&2
+    return 1
+  fi
+  if votd_telegram_send "Verse of the Day" "Test notification from bible.sh."; then
+    echo "Test message sent."
+  else
+    echo "Test message failed — check the token and chat id." >&2
+    return 1
+  fi
+}
+
+votd_telegram_cli() {
+  votd_config_load
+  case "${1:-status}" in
+    setup) votd_telegram_setup ;;
+    test) votd_telegram_test ;;
+    on)
+      if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+        echo "Set up credentials first: bible votd telegram setup" >&2
+        return 1
+      fi
+      VOTD_TELEGRAM=on
+      votd_config_save
+      echo "Telegram notifications enabled."
+      ;;
+    off)
+      VOTD_TELEGRAM=off
+      votd_config_save
+      echo "Telegram notifications disabled."
+      ;;
+    *) votd_cron_status ;;
+  esac
+}
+
+votd_cron_line() {
+  crontab -l 2>/dev/null | grep -F "$_VOTD_CRON_TAG" | tail -n 1
+}
+
+votd_cron_installed() {
+  [[ -n "$(votd_cron_line)" ]]
+}
+
+votd_cron_install() {
+  local time="${1:-}" ver="${2:-}" min hour self resolved tmp
+  votd_config_load
+  if [[ -z "$time" ]]; then
+    read -rp "Time of day (HH:MM) [${VOTD_CRON_TIME:-07:00}]: " time </dev/tty
+    time="${time:-${VOTD_CRON_TIME:-07:00}}"
+  fi
+  if [[ ! "$time" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    echo "Invalid time '$time' — use HH:MM (24h), e.g. 07:00." >&2
+    return 1
+  fi
+  if [[ -z "$ver" ]]; then
+    read -rp "Version [${VOTD_CRON_VERSION:-$DEF_VERSION}]: " ver </dev/tty
+    ver="${ver:-${VOTD_CRON_VERSION:-$DEF_VERSION}}"
+  fi
+  resolved=$( version="$ver"; version_case; [[ -n "$num" ]] && echo "$version" )
+  if [[ -z "$resolved" ]]; then
+    echo "Unknown version '$ver'." >&2
+    return 1
+  fi
+  ver="$resolved"
+  hour="$((10#${time%%:*}))"
+  min="$((10#${time#*:}))"
+  self=$(readlink -f "${BASH_SOURCE[0]}")
+  mkdir -p "$BIBLE_CACHE"
+  VOTD_CRON_TIME="$time"
+  VOTD_CRON_VERSION="$ver"
+  votd_config_save
+  tmp=$(mktemp)
+  crontab -l 2>/dev/null | grep -vF "$_VOTD_CRON_TAG" > "$tmp" || true
+  printf '%d %d * * * "%s" --votd %s >> "%s/votd-cron.log" 2>&1 %s\n' \
+    "$min" "$hour" "$self" "$ver" "$BIBLE_CACHE" "$_VOTD_CRON_TAG" >> "$tmp"
+  if crontab "$tmp"; then
+    rm -f "$tmp"
+    echo "Installed daily VOTD at $time ($ver)."
+    echo "Log: $BIBLE_CACHE/votd-cron.log"
+  else
+    rm -f "$tmp"
+    echo "Could not install the crontab entry." >&2
+    return 1
+  fi
+}
+
+votd_cron_remove() {
+  local tmp
+  tmp=$(mktemp)
+  crontab -l 2>/dev/null | grep -vF "$_VOTD_CRON_TAG" > "$tmp" || true
+  if crontab "$tmp"; then
+    rm -f "$tmp"
+    echo "Removed the daily VOTD cronjob."
+  else
+    rm -f "$tmp"
+    echo "Could not update the crontab." >&2
+    return 1
+  fi
+}
+
+votd_cron_status() {
+  votd_config_load
+  if votd_cron_installed; then
+    echo "Daily VOTD: ${VOTD_CRON_TIME:-?} ${VOTD_CRON_VERSION:-?}"
+    echo "  $(votd_cron_line)"
+  else
+    echo "Daily VOTD: not installed (bible votd install 07:00 KJV)."
+  fi
+  if votd_telegram_enabled; then
+    echo "Telegram:   enabled (chat $TELEGRAM_CHAT_ID)"
+  else
+    echo "Telegram:   disabled (bible votd telegram setup)."
+  fi
+}
+
 votd() {
   if [[ "${2:-}" =~ ^[[:digit:]]+$ ]]
   then
@@ -3638,8 +3857,8 @@ votd() {
   # Display output
   output_correction
   output "$description" "$book" "$chapter_verse" "$version" "$link"
-  # Send desktop notification (skipped for text-only home use)
-  if [[ -z "${VOTD_TEXT:-}" ]] && [[ $(command -v 'notify-send') ]]
+  # Notifications (skipped for text-only home use)
+  if [[ -z "${VOTD_TEXT:-}" ]]
   then
     message=$(
       # Disable colors
@@ -3652,14 +3871,20 @@ votd() {
       output_correction
     output "$description" "$book" "$chapter_verse" "$votd_version" "$link")
     # Send notification to desktop
-    notify-send \
-      --hint=string:sound-name:dialog-information \
-      --app-name="Verse of the Day" \
-      --app-icon="dialog-information-symbolic" \
-      --icon="$votd_img_tmp" \
-      "Verse of the Day" \
-      "$message"
-    rm "$votd_img_tmp"
+    if [[ $(command -v 'notify-send') ]]
+    then
+      notify-send \
+        --hint=string:sound-name:dialog-information \
+        --app-name="Verse of the Day" \
+        --app-icon="dialog-information-symbolic" \
+        --icon="$votd_img_tmp" \
+        "Verse of the Day" \
+        "$message"
+      rm "$votd_img_tmp"
+    fi
+    # Send Telegram notification (if configured)
+    votd_config_load
+    votd_telegram_send "Verse of the Day" "$message" || true
   fi
 }
 
@@ -3917,6 +4142,9 @@ bible.sh — the whole Bible in one shell file.
                        you mean" suggestions. Falls back to the offline
                        KJV database, then the bible.com search page.
   --votd      | -v     bible -v
+                       Daily cronjob:  bible votd install 07:00 KJV
+                       Remove/status:  bible votd remove | bible votd status
+                       Telegram:       bible votd telegram setup|test|on|off
   proverb              bible proverb
                        Read today's chapter of Proverbs (31 chapters,
                        one per day; menu: Read → "A proverb a day").
@@ -5052,8 +5280,83 @@ hotkey_label() {
 }
 
 menu_votd() {
+  local key
   votd "$DEF_VERSION"
+  while true; do
+    votd_config_load
+    printf '\n'
+    printf '  %s[c]%s Daily cronjob' "${BOLD}${GREEN}" "${NC}"
+    if votd_cron_installed; then
+      printf ' %s(%s %s)%s' "${DIM}" "${VOTD_CRON_TIME:-?}" "${VOTD_CRON_VERSION:-?}" "${NC}"
+    fi
+    printf '   %s[t]%s Telegram' "${BOLD}${GREEN}" "${NC}"
+    if votd_telegram_enabled; then
+      printf ' %s(on)%s' "${DIM}" "${NC}"
+    fi
+    printf '   %s[Enter]%s Back\n' "${BOLD}${DIM}" "${NC}"
+    printf '› '
+    IFS= read -rsn1 key </dev/tty
+    printf '\n'
+    case "${key,,}" in
+      c) votd_cron_menu ;;
+      t) votd_telegram_menu ;;
+      ""|$'\r'|$'\n'|q) break ;;
+    esac
+  done
+}
+
+votd_cron_menu() {
+  votd_config_load
+  local choice time ver
+  if votd_cron_installed; then
+    choice=$(pick_from_list "Daily VOTD (${VOTD_CRON_TIME:-?} ${VOTD_CRON_VERSION:-?}):" \
+      "Update time / version" "Remove cronjob")
+    case "$choice" in
+      "Update time / version") ;;
+      "Remove cronjob")
+        votd_cron_remove
+        pause
+        return
+        ;;
+      *) return ;;
+    esac
+  else
+    choice=$(pick_from_list "Daily VOTD:" "Install cronjob")
+    [[ "$choice" == "Install cronjob" ]] || return
+  fi
+  read -rp "Time of day (HH:MM) [${VOTD_CRON_TIME:-07:00}]: " time </dev/tty
+  time="${time:-${VOTD_CRON_TIME:-07:00}}"
+  read -rp "Version [${VOTD_CRON_VERSION:-$DEF_VERSION}]: " ver </dev/tty
+  ver="${ver:-${VOTD_CRON_VERSION:-$DEF_VERSION}}"
+  votd_cron_install "$time" "$ver"
   pause
+}
+
+votd_telegram_menu() {
+  votd_config_load
+  local choice
+  if votd_telegram_enabled; then
+    choice=$(pick_from_list "Telegram VOTD (enabled):" \
+      "Send test message" "Change credentials" "Disable")
+  else
+    choice=$(pick_from_list "Telegram VOTD (disabled):" "Set up / enable")
+  fi
+  case "$choice" in
+    "Send test message")
+      votd_telegram_test
+      pause
+      ;;
+    "Change credentials"|"Set up / enable")
+      votd_telegram_setup
+      pause
+      ;;
+    "Disable")
+      VOTD_TELEGRAM=off
+      votd_config_save
+      echo "Telegram notifications disabled."
+      pause
+      ;;
+  esac
 }
 
 menu_saved() {
@@ -5138,7 +5441,19 @@ if [[ $# -gt 0 ]]; then
     --help | -h) usage ;;
     --bible | -b) shift; bible "$@" ;;
     --search | -s) shift; search "$@" ;;
-    --votd | -v | votd) shift; votd "$@" ;;
+    --votd | votd)
+      shift
+      case "${1:-}" in
+        install|cron|install-cron) shift; votd_cron_install "$@" ;;
+        remove|uncron|remove-cron|uninstall) shift; votd_cron_remove ;;
+        cron-status|status) shift; votd_cron_status ;;
+        telegram) shift; votd_telegram_cli "$@" ;;
+        *) votd "$@" ;;
+      esac
+      _votd_rc=$?
+      exit "$_votd_rc"
+      ;;
+    -v) shift; votd "$@" ;;
     --listen | -l) shift; listen "$@" ;;
     --compare | -c) shift; compare "$@" ;;
     --saved | -a | saved) shift; witness_saved "$@" ;;

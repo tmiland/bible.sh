@@ -201,6 +201,26 @@ bible votd
 
 <a href="https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd_notify.png">![votd_notify](https://raw.githubusercontent.com/tmiland/bible.sh/main/assets/votd_notify.png)</a>
 
+**Daily delivery**
+
+```shell
+bible votd install 07:00 KJV   # cronjob; log: ~/.cache/bible/votd-cron.log
+bible votd status              # show cronjob + Telegram state
+bible votd remove              # remove the cronjob
+```
+
+Telegram notifications reuse the `telegram.bot` sender from
+[space-weather-alerts](https://github.com/tmiland/space-weather-alerts):
+
+```shell
+bible votd telegram setup      # install helper, save token/chat id, send test
+bible votd telegram test|on|off
+```
+
+Settings live in `~/.credentials/.bible_votd` (mode 0600). In the
+interactive menu, open Verse of the Day and press `c` (cronjob) or
+`t` (Telegram).
+
 ---
 
 ## 🌐 Offline Bible
