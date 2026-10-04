@@ -1910,42 +1910,77 @@ _hl_book_scan() {
   local tmpd args
   tmpd=$(mktemp -d)
   args=( -s -m 20 -H "x-yvp-app-key: $key" -H "Authorization: Bearer $tok" )
+  local -A hcode=()
   if curl --version 2>/dev/null | grep -qi parallel; then
     local -a urls=()
     for ch in $(seq 1 "$maxch"); do
-      urls+=(-o "$tmpd/$ch" "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch")
+      urls+=(-o "$tmpd/$ch" -w '%{http_code} %{url_effective}\n' \
+        "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch")
     done
-    curl "${args[@]}" "${urls[@]}" --parallel --parallel-max 10 >/dev/null 2>&1 || true
+    curl "${args[@]}" "${urls[@]}" --parallel --parallel-max 10 >"$tmpd/codes" 2>/dev/null || true
+    while read -r c u; do
+      [[ -n "$c" && -n "$u" ]] && hcode[${u##*.}]="$c"
+    done <"$tmpd/codes"
   else
     for ch in $(seq 1 "$maxch"); do
-      curl "${args[@]}" -o "$tmpd/$ch" "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch" 2>/dev/null || true
+      hcode[$ch]=$(curl "${args[@]}" -w '%{http_code}' -o "$tmpd/$ch" \
+        "$_YVP_HL_BASE/v1/highlights?bible_id=$bid&passage_id=$osis.$ch" 2>/dev/null) || true
     done
   fi
-  if [[ ! -f "$tmpd/1" ]] || ! jq -e 'has("data")' "$tmpd/1" >/dev/null 2>&1; then
+  local body pgid col cnt
+  local fail_ch="" fail_code=""
+  for ch in $(seq 1 "$maxch"); do
+    local code="${hcode[$ch]:-000}"
+    if [[ "$code" == "000" ]]; then
+      # No HTTP code: curl failed. Missing file = network error; a file
+      # (empty or not) means the transfer happened, so classify by size.
+      if [[ ! -f "$tmpd/$ch" ]]; then
+        [[ -n "$fail_ch" ]] || { fail_ch="$ch"; fail_code="000"; }
+        continue
+      elif [[ ! -s "$tmpd/$ch" ]]; then
+        code=204
+      else
+        code=200
+      fi
+    fi
+    case "$code" in
+      200)
+        if ! jq -e 'has("data")' "$tmpd/$ch" >/dev/null 2>&1; then
+          [[ -n "$fail_ch" ]] || { fail_ch="$ch"; fail_code="$code"; }
+          continue
+        fi
+        body=$(cat "$tmpd/$ch" 2>/dev/null)
+        cnt=0
+        while read -r pgid col; do
+          [[ -n "$pgid" && -n "$col" ]] || continue
+          _HL_BOOK_HIGHLIGHTS+="${ch}:${pgid##*.}=$col "
+          cnt=$((cnt + 1))
+        done < <(printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null)
+        if (( cnt > 0 )); then
+          _HL_BOOK_HLCOUNT+="${ch}=${cnt} "
+        fi
+        ;;
+      204)
+        : # valid: no highlights in this chapter
+        ;;
+      *)
+        [[ -n "$fail_ch" ]] || { fail_ch="$ch"; fail_code="$code"; }
+        ;;
+    esac
+  done
+  if [[ -n "$fail_ch" ]]; then
     local apierr
-    apierr=$(jq -r '.error_description // .error // empty' "$tmpd/1" 2>/dev/null)
+    apierr=$(jq -r '.error_description // .error // .fault.faultstring // empty' "$tmpd/$fail_ch" 2>/dev/null)
     rm -rf "$tmpd"
-    if [[ -n "$apierr" ]]; then
-      _HL_BOOK_ERROR="Read failed: $apierr. Run: bible hl login"
+    if [[ "$fail_code" == "000" ]]; then
+      _HL_BOOK_ERROR="Read failed (network error, chapter $fail_ch). Check your connection and try again."
+    elif [[ -n "$apierr" ]]; then
+      _HL_BOOK_ERROR="Read failed: $apierr (HTTP $fail_code, chapter $fail_ch). Run: bible hl login"
     else
-      _HL_BOOK_ERROR="Read failed (API or network error). Run: bible hl login"
+      _HL_BOOK_ERROR="Read failed (HTTP $fail_code, chapter $fail_ch). Run: bible hl login"
     fi
     return 1
   fi
-  local body pgid col cnt
-  for ch in $(seq 1 "$maxch"); do
-    [[ -f "$tmpd/$ch" ]] || continue
-    body=$(cat "$tmpd/$ch")
-    cnt=0
-    while read -r pgid col; do
-      [[ -n "$pgid" && -n "$col" ]] || continue
-      _HL_BOOK_HIGHLIGHTS+="${ch}:${pgid##*.}=$col "
-      cnt=$((cnt + 1))
-    done < <(printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null)
-    if (( cnt > 0 )); then
-      _HL_BOOK_HLCOUNT+="${ch}=${cnt} "
-    fi
-  done
   rm -rf "$tmpd"
   return 0
 }
