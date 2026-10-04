@@ -109,6 +109,12 @@ All notable changes to this project are documented in this file.
   (verified against whole chapters, ranges and accented text); when a
   chapter has no JSON content the read reports "No result." /
   "omitted from this version" exactly as before.
+- **Menu "Default version" now lists the full catalog**: the picker
+  offers every version licensed to the app key (same "ID ABBR LANG"
+  lines as `bible versions`, grouped by language) with the curated
+  shortlist on top; fzf searches all of it. Without a catalog it falls
+  back to the shortlist, and the non-fzf numbered menu asks for a
+  language tag first.
 
 ## [1.2.0] - 2026-09-15
 

@@ -762,22 +762,27 @@ _yvp_catalog() {
 }
 
 declare -A _YVP_CATALOG_BY_ABBR=()
+declare -A _YVP_CATALOG_BY_ABBR_LANG=()
 declare -A _YVP_CATALOG_BY_ID=()
 _YVP_CATALOG_LOADED=""
 
 _yvp_catalog_load() {
   # Populate the in-process lookup maps from the cached catalog:
-  # _YVP_CATALOG_BY_ABBR (uppercased abbreviation → TSV row) and
+  # _YVP_CATALOG_BY_ABBR (uppercased abbreviation → TSV row),
+  # _YVP_CATALOG_BY_ABBR_LANG (abbreviation:language → TSV row) and
   # _YVP_CATALOG_BY_ID (id → TSV row). Loaded once per process.
   [[ -n "$_YVP_CATALOG_LOADED" ]] && return 0
   local tsv id abbr ltag row
   tsv=$(_yvp_catalog) || return 1
   while IFS=$'\t' read -r id abbr ltag; do
     [[ -n "$id" && -n "$abbr" ]] || continue
+    ltag="${ltag,,}"
+    [[ "$ltag" == "no" ]] && ltag=nb # Norwegian alias
     row="$id"$'\t'"$abbr"$'\t'"$ltag"
     # First row wins on collisions (the catalog leads with the
     # primary/English editions).
     [[ -n "${_YVP_CATALOG_BY_ABBR[${abbr^^}]:-}" ]] || _YVP_CATALOG_BY_ABBR["${abbr^^}"]="$row"
+    [[ -n "${_YVP_CATALOG_BY_ABBR_LANG[${abbr^^}:$ltag]:-}" ]] || _YVP_CATALOG_BY_ABBR_LANG["${abbr^^}:$ltag"]="$row"
     [[ -n "${_YVP_CATALOG_BY_ID[$id]:-}" ]] || _YVP_CATALOG_BY_ID["$id"]="$row"
   done <<< "$tsv"
   _YVP_CATALOG_LOADED=1
@@ -794,22 +799,32 @@ _yvp_version_row() {
 
 _yvp_bible_id() {
   # $1 = web version id (version_case num), $3 = version abbreviation
-  # (fallback when $1 is empty or unmapped). $2 (language) is unused
-  # since the catalog lookup is language-independent; callers still
-  # pass it so the signature stays stable.
+  # (fallback when $1 is empty or unmapped). $2 = language tag, used to
+  # disambiguate abbreviations shared across languages ("KJV" is both
+  # the English version and a Thai edition in the catalog).
   # Echo the Platform API bible id when that version is in the
   # catalog, else non-zero. The API reuses the same canonical ids as
   # bible.com (NIV=111, AMP=1588, GNV=2163), so this is purely a
   # catalog/licensing check against a TTL-cached list.
-  local num="$1" abbr="${3:-}" row=""
+  local num="$1" lang="${2:-}" abbr="${3:-}" row=""
   _yvp_catalog_load || return 1
   if [[ -n "$num" ]]; then
     row="${_YVP_CATALOG_BY_ID[$num]:-}"
   fi
   # Fallback: match the version abbreviation case-insensitively so a
   # newly licensed version works even before version_case maps it.
+  # When a language is given the match must agree on it, otherwise an
+  # English request would silently resolve to a same-abbreviation
+  # edition in another language (KJV → Thai). With no language the
+  # abbreviation-only row is the best available guess.
   if [[ -z "$row" && -n "$abbr" ]]; then
-    row="${_YVP_CATALOG_BY_ABBR[${abbr^^}]:-}"
+    lang="${lang,,}"
+    [[ "$lang" == "no" ]] && lang=nb # Norwegian alias
+    if [[ -n "$lang" ]]; then
+      row="${_YVP_CATALOG_BY_ABBR_LANG[${abbr^^}:$lang]:-}"
+    else
+      row="${_YVP_CATALOG_BY_ABBR[${abbr^^}]:-}"
+    fi
   fi
   [[ -n "$row" ]] || return 1
   printf '%s' "${row%%$'\t'*}"
@@ -1020,7 +1035,7 @@ _yvp_search_render() {
   # page shown, and a failed fetch degrades to the ref + link only.
   local num="$1" ver="$2" bid="${3:-}"
   local -a refs
-  local ref book cv text n=0
+  local ref book cv text tkey n=0
   mapfile -t refs < <(printf '%s' "$_YVP_SEARCH_JSON" | jq -r '.verses[]?.reference // empty' 2>/dev/null)
   echo ""
   echo "Search results from YouVersion Platform API — \"${_YVP_SEARCH_QUERY:-}\""
@@ -1037,10 +1052,11 @@ _yvp_search_render() {
   for ref in "${refs[@]}"; do
     [[ -z "$ref" ]] && continue
     n=$((n + 1))
-    text="${_YVP_TEXT_CACHE[$ref]:-}"
+    tkey="${bid}:${ref}"
+    text="${_YVP_TEXT_CACHE[$tkey]:-}"
     if [[ -z "$text" && -n "$bid" ]]; then
       text=$(_yvp_passage_text "$bid" "$ref" 2>/dev/null) || text=""
-      [[ -n "$text" ]] && _YVP_TEXT_CACHE[$ref]="$text"
+      [[ -n "$text" ]] && _YVP_TEXT_CACHE[$tkey]="$text"
     fi
     book=$(_yvp_book_name "${ref%%.*}")
     cv="${ref#*.}"
@@ -4756,14 +4772,56 @@ menu_offline() {
 }
 
 menu_version() {
-  local choice
-  choice=$(pick_from_list "Default version (now: $DEF_VERSION):" \
-    "${_VERSIONS_EN[@]}" "${_VERSIONS_NO[@]}" "${_VERSIONS_ORIG[@]}")
-  if [[ -n "$choice" ]]; then
-    DEF_VERSION="$choice"
-    echo "Default version: $DEF_VERSION"
-    sleep 0.5
+  # Pick the default version. With a Platform API catalog available this
+  # offers every licensed version (the same "ID ABBR LANG" lines as
+  # `bible versions`, grouped by language), with the curated shortlist on
+  # top for the usual favourites. Without a catalog (no key, offline) it
+  # falls back to just the shortlist.
+  local choice tsv lang id abbr ltag i
+  local -a labels picks
+  labels=("${_VERSIONS_EN[@]}" "${_VERSIONS_NO[@]}" "${_VERSIONS_ORIG[@]}")
+  picks=("${labels[@]}")
+  if tsv=$(_yvp_catalog); then
+    if [[ "$_HAVE_FZF" == true ]]; then
+      # fzf searches the whole list, so add everything.
+      while IFS=$'\t' read -r id abbr ltag; do
+        [[ -n "$id" && -n "$abbr" ]] || continue
+        labels+=("$(printf '%-6s %-18s %s' "$id" "$abbr" "$ltag")")
+        picks+=("$abbr")
+      done < <(printf '%s\n' "$tsv" | sort -t$'\t' -k3,3 -k2,2)
+    else
+      # A numbered menu cannot handle 1,400+ rows: filter by language.
+      read -rp "Language tag (e.g. en, nb, es; empty = common versions): " lang </dev/tty
+      lang="${lang,,}"
+      [[ "$lang" == "no" ]] && lang=nb
+      if [[ -n "$lang" ]]; then
+        labels=(); picks=()
+        while IFS=$'\t' read -r id abbr ltag; do
+          [[ -n "$id" && -n "$abbr" ]] || continue
+          labels+=("$(printf '%-6s %-18s %s' "$id" "$abbr" "$ltag")")
+          picks+=("$abbr")
+        done < <(printf '%s\n' "$tsv" | awk -F'\t' -v l="$lang" 'tolower($3)==l' | sort -t$'\t' -k3,3 -k2,2)
+        if ((${#labels[@]} == 0)); then
+          printf 'No versions for language "%s".\n' "$lang" >&2
+          sleep 1
+          return 0
+        fi
+      fi
+    fi
   fi
+  choice=$(pick_from_list "Default version (now: $DEF_VERSION):" "${labels[@]}")
+  [[ -n "$choice" ]] || return 0
+  # Map the chosen label back to its abbreviation (duplicate labels,
+  # e.g. the shortlist entry and its catalog row, resolve the same).
+  for i in "${!labels[@]}"; do
+    if [[ "${labels[$i]}" == "$choice" ]]; then
+      choice="${picks[$i]}"
+      break
+    fi
+  done
+  DEF_VERSION="$choice"
+  echo "Default version: $DEF_VERSION"
+  sleep 0.5
 }
 
 menu_search() {
