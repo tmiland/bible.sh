@@ -4503,6 +4503,8 @@ fi
 # --- Helpers ---------------------------------------------------------
 # One-keypress navigation: letters as-is (lowercased); Right arrow → n,
 # Left arrow → p. $1 = optional prompt (printed to stderr, like read -p).
+# The prompt line is closed with a newline after the keypress, so callers
+# that return to a redrawn menu don't print onto the prompt line.
 read_key() {
   local k c d
   [[ -n "$1" ]] && printf '%s' "$1" >&2
@@ -4518,6 +4520,7 @@ read_key() {
       fi
     fi
   fi
+  [[ -n "$1" ]] && printf '\n' >&2
   printf '%s' "${k,,}"
 }
 
