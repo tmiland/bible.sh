@@ -1388,6 +1388,20 @@ _hl_token_refresh() {
   return 0
 }
 
+_hl_token_valid() {
+  # Probe the cached access token against the API. Returns 0 unless the
+  # server explicitly rejects it (HTTP 401); network failures count as
+  # valid so offline use does not force a re-login.
+  _hl_read_tokens || return 1
+  local key code
+  key=$(_yvp_key) || return 1
+  code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' \
+    -H "x-yvp-app-key: $key" \
+    -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
+    "${_YVP_HL_BASE}/v1/highlights?bible_id=1&passage_id=MAT.1") || return 0
+  [[ "$code" != "401" ]]
+}
+
 _hl_id_claims() {
   # Decode the id_token payload (base64url JWT). Echoes a JSON object with
   # name/email; empty output when the token is missing or unreadable.
@@ -1494,8 +1508,18 @@ hl_login() {
   # When not configured yet, prompt for the App Key / Redirect URI first
   # and offer to save them for next time.
   if _hl_read_tokens; then
-    echo "Already logged in (tokens cached)."
-    return 0
+    if [[ "${1:-}" == "--force" || "${1:-}" == "-f" ]]; then
+      hl_logout >/dev/null
+    elif _hl_token_valid; then
+      echo "Already logged in (tokens cached)."
+      return 0
+    elif _hl_token_refresh 2>/dev/null; then
+      echo "Session refreshed (tokens updated)."
+      return 0
+    else
+      echo "Cached session expired — starting a fresh login."
+      hl_logout >/dev/null
+    fi
   fi
   if ! _hl_configured; then
     _hl_configure_prompt || return 1
@@ -1898,8 +1922,14 @@ _hl_book_scan() {
     done
   fi
   if [[ ! -f "$tmpd/1" ]] || ! jq -e 'has("data")' "$tmpd/1" >/dev/null 2>&1; then
+    local apierr
+    apierr=$(jq -r '.error_description // .error // empty' "$tmpd/1" 2>/dev/null)
     rm -rf "$tmpd"
-    _HL_BOOK_ERROR="Read failed (API or network error). Run: bible hl login"
+    if [[ -n "$apierr" ]]; then
+      _HL_BOOK_ERROR="Read failed: $apierr. Run: bible hl login"
+    else
+      _HL_BOOK_ERROR="Read failed (API or network error). Run: bible hl login"
+    fi
     return 1
   fi
   local body pgid col cnt
@@ -1960,6 +1990,13 @@ hl_status() {
   [[ -f "$_YVP_HL_CONFIG" ]] && echo "Config file:      $_YVP_HL_CONFIG"
   if _hl_read_tokens 2>/dev/null; then
     echo "Tokens cached:    yes"
+    if _yvp_key >/dev/null 2>&1; then
+      if _hl_token_valid; then
+        echo "Token status:     valid"
+      else
+        echo "Token status:     expired (run: bible hl login)"
+      fi
+    fi
     local claims nm em
     claims=$(_hl_id_claims)
     if [[ -n "$claims" ]]; then
@@ -5479,7 +5516,7 @@ if [[ $# -gt 0 ]]; then
       shift
       _hl_rc=0
       case "${1:-status}" in
-        login) shift; hl_login ;;
+        login) shift; hl_login "$@" ;;
         logout) shift; hl_logout ;;
         config) shift; _hl_configure_prompt; _hl_config_save; echo "Saved to ~/.credentials/.bible_yvp_oauth and ~/.credentials/.bible.com_token." ;;
         approve) shift; hl_approve ;;
