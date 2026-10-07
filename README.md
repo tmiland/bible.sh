@@ -364,15 +364,20 @@ Run one command, approve it in your browser, and you're in:
 ```shell
 bible hl login          # one-time sign-in — that's it
 bible hl status         # see your config, token and signed-in account
-bible hl list           # highlights in your last-read chapter
-bible hl list JHN.3     # ...or any chapter you name
-bible hl add JHN.3.16   # highlight a verse (pick a color: bible hl add JHN.3.16 44aa44)
+bible hl scan JHN       # scan a book's chapters, cache the highlights
+bible hl scan all       # ...or sweep the whole Bible (once)
+bible hl list           # list everything in the local highlights cache
+bible hl list JHN       # one book (rescans it only when the cache is stale)
+bible hl list JHN.3     # ...or just one chapter
+bible hl add JHN.3.16   # highlight a verse — pick a color from swatches, or pass a hex: bible hl add JHN.3.16 44aa44
 bible hl rm  JHN.3.16   # clear the highlight on that verse
 ```
 
 While you read or listen to a chapter, highlighted verses are **marked
 inline with a colored ●** so you can see at a glance which verses you've
-underlined on the bright side.
+underlined on the bright side. Pressing `h` while reading acts on the
+verse you're on — if it's already highlighted, the menu offers Update
+color / Clear highlight / Other verse… right away.
 
 The Highlights entry in the menu (`g`) is a small **highlights browser**:
 it lets you scan a whole book — the one you're reading or any other —
@@ -382,10 +387,12 @@ highlights from the same menu.
 
 YouVersion's API stores highlights per *verse group* as a color
 (`RRGGBB`), keyed by Bible version — there's no "list everything" call,
-so the browser queries each chapter in the book in one parallel sweep (a
-150-chapter book takes under two seconds). Listing every highlight in the
-whole Bible would mean ~1,189 chapter requests per version, so the menu
-keeps its scope to one book at a time.
+so a scan queries each chapter in the book in one parallel sweep (a
+150-chapter book takes under two seconds). Scan results are cached
+locally (`~/.cache/bible/youversion-highlights`) and stay fresh for six
+hours (`_HL_CACHE_TTL_MIN`), so `bible hl list` shows your highlights
+without re-hitting the API, and `bible hl scan all` sweeps the whole
+Bible (~1,189 chapter requests per version) once, then lists from cache.
 
 Everything the code needs is already built in: a shared public OAuth
 client_id (XOR-masked in the source so it never sits in plaintext, and

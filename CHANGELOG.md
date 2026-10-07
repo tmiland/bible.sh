@@ -85,8 +85,18 @@ All notable changes to this project are documented in this file.
   markers inline (a parallel per-chapter sweep keeps even a 150-chapter
   book under two seconds). The current chapter's highlighted verses are
   one keypress away in the same menu. (Highlights are stored per chapter
-  on the API — there is no "list everything" call, and a whole-Bible
-  sweep would need ~1,189 requests, so the menu stays book-scoped.)
+  on the API — there is no "list everything" call — so the browser
+  sweeps one book at a time, with a full sweep in the same menu.)
+- **Highlights cache & listing**: scan results are now stored locally
+  (`~/.cache/bible/youversion-highlights/<version>-<book>.json`, with
+  per-chapter counts and scan time), fresh for six hours
+  (`_HL_CACHE_TTL_MIN` overrides). `bible hl list` with no arguments
+  lists every cached book newest-first (stale entries are flagged with a
+  refresh hint), `bible hl list <BOOK>` rescans only when the cache is
+  stale, and `bible hl scan all` sweeps all ~1,189 chapters with a
+  per-book progress line, caching each book as it goes; `bible hl status`
+  reports the cache size. The highlights menu (`g`) also offers "Scan all
+  books" and "List all cached highlights" entries.
 - **Zero-setup highlights login**: bible.sh ships with a shared YouVersion
   App Key (a public OAuth `client_id`, XOR-masked in the source so it never
   sits in plaintext). Most users just run `bible hl login` and approve in
@@ -107,6 +117,12 @@ All notable changes to this project are documented in this file.
   menu exposes both via `c` (cronjob) and `t` (Telegram).
 
 ### Changed
+- **Highlight color picker**: `bible hl add` now offers a swatch
+  palette matching the YouVersion app — Yellow, Green, Blue, Peach,
+  Pink, Lavender (truecolor blocks in fzf and the numbered menu), plus
+  "Custom hex…" for anything else. The hex argument still works
+  non-interactively, and the old default (`5dff79`) is no longer
+  needed for new highlights.
 - **Chapter reads and `--listen` no longer scrape bible.com HTML**: both
   now use the YouVersion JSON APIs —
   `bible.youversionapi.com/3.1/chapter.json` for verse text (single
@@ -127,6 +143,11 @@ All notable changes to this project are documented in this file.
   shortlist on top; fzf searches all of it. Without a catalog it falls
   back to the shortlist, and the non-fzf numbered menu asks for a
   language tag first.
+- **Reader highlight key (`h`) knows the current verse**: when the verse
+  you're on is already highlighted, `h` now opens the action menu
+  directly — Update color / Clear highlight / **Other verse…** / Cancel —
+  instead of asking which verse to highlight and only then revealing
+  that it was already highlighted.
 
 ## [1.2.0] - 2026-09-15
 

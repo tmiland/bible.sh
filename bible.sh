@@ -1242,6 +1242,11 @@ _yvp_book_name() {
 
 _YVP_HL_BASE="${YVP_API_BASE:-https://api.youversion.com}"
 _YVP_HL_TOKEN_CACHE="${BIBLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/bible}/youversion-tokens.json"
+# Canonical highlight swatches from the YouVersion app (YPE-5058). The
+# interactive picker shows these as colored blocks; the API accepts any
+# RRGGBB value, so "Custom hex" still exists for the full spectrum.
+_HL_PALETTE_NAMES=(Yellow Green Blue Peach Pink Lavender)
+_HL_PALETTE_HEXES=(ffec5b b4ffc1 bbf4ff ffdca7 ffcff8 dfdcff)
 # OAuth client credentials can be entered interactively (bible hl login)
 # and saved here; environment variable YVP_REDIRECT_URI always wins over
 # the saved value. The Platform App Key doubles as the OAuth client_id
@@ -1266,6 +1271,15 @@ _YVP_HL_REDIRECT_DEFAULT="http://localhost:8080/oauth"
 # Highlight colors for the chapter currently being rendered:
 # "VERSE NR=#RRGGBB VERSE NR=#RRGGBB …" (empty when not logged in / none).
 _HL_CHAPTER_COLORS=""
+# Local highlights cache: one JSON per scanned book, written after each
+# successful book scan (see _hl_cache_write below). Entries older than
+# _HL_CACHE_TTL_MIN minutes count as stale and are rescanned on demand.
+_HL_CACHE_DIR="$BIBLE_CACHE/youversion-highlights"
+_HL_CACHE_TTL_MIN="${_HL_CACHE_TTL_MIN:-360}"
+_HL_CACHE_HIGHLIGHTS=""
+_HL_CACHE_COUNTS=""
+_HL_CACHE_AGE=0
+_HL_CACHE_STALE=0
 
 # Load the saved Redirect URI (env var wins). The file holds one line:
 # YVP_REDIRECT_URI=…
@@ -1722,6 +1736,7 @@ _hl_default_bible_id() {
 _hl_fetch_passage() {
   # $1=bible_id $2=passage_id (chapter USFM, e.g. JHN.3). Echoes the
   # data[] entries ("passage_id color" per line) on success.
+  # HTTP 204 means the chapter has no highlights: valid, empty output.
   # Returns 1 and echoes an error message on failure.
   # Automatically retries once after a token refresh on HTTP 401.
   _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
@@ -1737,7 +1752,7 @@ _hl_fetch_passage() {
       -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
       "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2")
   fi
-  if [[ "$http_code" != "200" ]]; then
+  if [[ "$http_code" != "200" && "$http_code" != "204" ]]; then
     rm -f "$tmpf"
     if [[ "$http_code" == "401" ]]; then
       echo "Access token expired and refresh failed. Run: bible hl login" >&2
@@ -1751,19 +1766,194 @@ _hl_fetch_passage() {
   printf '%s' "$body" | jq -r '.data[]? | "\(.passage_id) \(.color)"' 2>/dev/null
 }
 
-hl_list() {
-  # List the highlighted verses of a chapter. Usage:
-  #   bible hl list <passage_id> [bible_id]     e.g. bible hl list JHN.3
-  # bible_id defaults to the version of your last read spot (KJV=1).
-  local pg="${1:-}" bid="${2:-}"
-  [[ -n "$pg" ]] || pg=$(sed -n 's/^\([^|]*\)|[^|]*|\([0-9]*\)|.*/\1.\2/p' "$BIBLE_LAST" 2>/dev/null | tail -1)
-  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
-  if [[ -z "$pg" ]]; then
-    echo "Usage: bible hl list <passage_id> [bible_id]" >&2
-    echo "  e.g.: bible hl list JHN.3   (highlights in John 3)" >&2
+_hl_existing_color() {
+  # $1=chapter passage id (e.g. JHN.3) $2=verse (number or range).
+  # Reads _hl_fetch_passage entries ("passage_id color" lines) on stdin.
+  # Echoes the highlight color, or nothing when the verse is clear.
+  local base="$1" v="$2" ep ec e
+  while read -r ep ec; do
+    [[ -n "$ep" ]] || continue
+    e="${ep#"$base."}"
+    if [[ "$e" == "$v" ]]; then
+      echo "$ec"
+      return 0
+    fi
+    if [[ "$v" =~ ^[0-9]+$ && "$e" =~ ^([0-9]+)-([0-9]+)$ ]] &&
+       ((v >= BASH_REMATCH[1] && v <= BASH_REMATCH[2])); then
+      echo "$ec"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# --- Highlights cache -------------------------------------------------
+# Every successful book scan is saved to
+#   $_HL_CACHE_DIR/<bible_id>-<osis>.json
+#   {"scanned_at":EPOCH,"bible_id":"1","osis":"JHN",
+#    "highlights":"3:36=5dff79 …","counts":"3=1 …"}
+# so listing later does not have to re-query the API. _hl_cache_load
+# returns 0 when a file exists and fills _HL_CACHE_* (with
+# _HL_CACHE_STALE=1 past _HL_CACHE_TTL_MIN). hl scan / a book browse
+# refresh the file; hl add / hl rm keep it in sync.
+
+_hl_cache_file() { printf '%s/%s-%s.json\n' "$_HL_CACHE_DIR" "$1" "$2"; }
+
+_hl_cache_write() {
+  # $1=bible_id $2=osis $3="ch:vnum=RRGGBB …" [$4=scanned_at epoch].
+  # Recomputes the per-chapter counts and writes the file atomically.
+  local bid="$1" osis="$2" toks="$3" ts="${4:-$(date +%s)}"
+  local counts="" ch n
+  for ch in $(printf '%s' "$toks" | tr ' ' '\n' | sed -n 's/^\([0-9][0-9]*\):.*/\1/p' | sort -n | uniq); do
+    n=$(printf '%s' "$toks" | tr ' ' '\n' | grep -c "^$ch:")
+    counts+="$ch=$n "
+  done
+  mkdir -p "$_HL_CACHE_DIR" 2>/dev/null || return 1
+  local f tmp
+  f=$(_hl_cache_file "$bid" "$osis")
+  tmp="$f.tmp.$$"
+  if jq -n --argjson ts "$ts" --arg bid "$bid" --arg osis "$osis" \
+        --arg hl "$toks" --arg ct "${counts% }" \
+        '{scanned_at:$ts, bible_id:$bid, osis:$osis, highlights:$hl, counts:$ct}' > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
     return 1
   fi
-  local out
+}
+
+_hl_cache_load() {
+  # $1=bible_id $2=osis. Returns 0 when a cache file exists and fills
+  # _HL_CACHE_HIGHLIGHTS/_HL_CACHE_COUNTS/_HL_CACHE_AGE; sets
+  # _HL_CACHE_STALE=1 when the entry is older than _HL_CACHE_TTL_MIN.
+  _HL_CACHE_HIGHLIGHTS=""
+  _HL_CACHE_COUNTS=""
+  _HL_CACHE_AGE=0
+  _HL_CACHE_STALE=0
+  local f ts
+  f=$(_hl_cache_file "$1" "$2")
+  [[ -f "$f" ]] || return 1
+  ts=$(jq -r '.scanned_at // 0' "$f" 2>/dev/null)
+  _HL_CACHE_HIGHLIGHTS=$(jq -r '.highlights // ""' "$f" 2>/dev/null)
+  _HL_CACHE_COUNTS=$(jq -r '.counts // ""' "$f" 2>/dev/null)
+  _HL_CACHE_AGE=$(( $(date +%s) - ${ts:-0} ))
+  (( _HL_CACHE_AGE > _HL_CACHE_TTL_MIN * 60 )) && _HL_CACHE_STALE=1
+  return 0
+}
+
+_hl_key_span() {
+  # $1=verse key ("n" or "a-b") → "lo hi".
+  local k="$1"
+  if [[ "$k" == *-* ]]; then
+    printf '%s %s\n' "${k%%-*}" "${k##*-}"
+  else
+    printf '%s %s\n' "$k" "$k"
+  fi
+}
+
+_hl_cache_update_token() {
+  # $1=bible_id $2=osis $3=chapter $4=verse ("n", "a-b", or "*" = whole chapter)
+  # $5=RRGGBB, or "" to remove the token. No-op when the book has no
+  # cache file (nothing stored that needs keeping fresh).
+  #
+  # The API expands ranges into one highlight per verse, so the cache
+  # stores them the same way. Every stored token that overlaps the passage
+  # (single or range) is replaced, which keeps updates and deletes from
+  # leaving stale or duplicate entries behind.
+  local bid="$1" osis="$2" ch="$3" vn="$4" col="$5"
+  local f toks="" nt="" t ts key k span lo hi tlo thi v
+  f=$(_hl_cache_file "$bid" "$osis")
+  [[ -f "$f" ]] || return 0
+  toks=$(jq -r '.highlights // ""' "$f" 2>/dev/null)
+  if [[ "$vn" == "*" ]]; then
+    for t in $toks; do
+      [[ "${t%%=*}" == "$ch:"* ]] && continue
+      nt+="$t "
+    done
+  else
+    span=$(_hl_key_span "$vn"); lo="${span% *}"; hi="${span#* }"
+    for t in $toks; do
+      key="${t%%=*}"
+      if [[ "$key" == "$ch:"* ]]; then
+        k="${key#*:}"
+        span=$(_hl_key_span "$k"); tlo="${span% *}"; thi="${span#* }"
+        if [[ "$lo$hi$tlo$thi" != *[!0-9]* ]] &&
+           (( tlo <= hi && lo <= thi )); then
+          # Re-emit the parts of this token outside the changed span.
+          local tcol="${t##*=}"
+          for (( v = tlo; v <= thi; v++ )); do
+            (( v >= lo && v <= hi )) && continue
+            nt+="$ch:$v=$tcol "
+          done
+          continue
+        fi
+        [[ "$k" == "$vn" ]] && continue
+      fi
+      nt+="$t "
+    done
+    if [[ -n "$col" ]]; then
+      if [[ "$lo$hi" != *[!0-9]* ]]; then
+        for (( v = lo; v <= hi; v++ )); do
+          nt+="$ch:$v=$col "
+        done
+      else
+        nt+="$ch:$vn=$col "
+      fi
+    fi
+  fi
+  ts=$(jq -r '.scanned_at // empty' "$f" 2>/dev/null)
+  _hl_cache_write "$bid" "$osis" "${nt% }" "${ts:-}"
+}
+
+_hl_fmt_age() {
+  # $1=seconds → "just now", "5m ago", "3h ago", "2d ago".
+  local s="${1:-0}"
+  if (( s < 90 )); then printf 'just now'
+  elif (( s < 5400 )); then printf '%dm ago' $(( s / 60 ))
+  elif (( s < 172800 )); then printf '%dh ago' $(( s / 3600 ))
+  else printf '%dd ago' $(( s / 86400 ))
+  fi
+}
+
+_hl_print_tokens() {
+  # $1=osis $2="ch:vnum=RRGGBB …" → "OSIS.ch.vnum  #RRGGBB" per line.
+  local t ch rest
+  for t in $2; do
+    ch="${t%%:*}"
+    rest="${t#*:}"
+    printf '%-12s  #%s\n' "$1.$ch.${rest%%=*}" "${rest#*=}"
+  done
+}
+
+hl_list() {
+  # List highlights. Usage:
+  #   bible hl list                     every book in the local cache
+  #   bible hl list <BOOK>              a whole book (scans it if needed)
+  #   bible hl list <passage_id> [bid]  one chapter, e.g. bible hl list JHN.3
+  # bible_id defaults to the version of your last read spot (KJV=1).
+  local pg="${1:-}" bid="${2:-}"
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
+  if [[ -z "$pg" ]]; then
+    _hl_list_cached
+    return
+  fi
+  if [[ "$pg" != *.* ]]; then
+    _hl_list_book "$bid" "$pg"
+    return
+  fi
+  # Chapter: serve a fresh cache entry, otherwise ask the API directly.
+  local osis="${pg%%.*}" ch="${pg#*.}" t toks="" out
+  if _hl_cache_load "$bid" "$osis" && (( ! _HL_CACHE_STALE )); then
+    for t in $_HL_CACHE_HIGHLIGHTS; do
+      [[ "${t%%:*}" == "$ch" ]] && toks+="$t "
+    done
+    if [[ -z "$toks" ]]; then
+      echo "No highlights in $pg."
+    else
+      _hl_print_tokens "$osis" "$toks"
+    fi
+    return 0
+  fi
   out=$(_hl_fetch_passage "$bid" "$pg") || return 1
   if [[ -z "$out" ]]; then
     echo "No highlights in $pg."
@@ -1772,6 +1962,154 @@ hl_list() {
   printf '%s\n' "$out" | while IFS=' ' read -r pgid col; do
     printf '%-12s  #%s\n' "$pgid" "$col"
   done
+}
+
+_hl_list_book() {
+  # $1=bible_id $2=book (OSIS code or display name). Uses a fresh cache
+  # entry when there is one, otherwise scans the book (which caches it).
+  local bid="$1" book="$2" osis name maxch
+  osis=$(_hl_osis_by_name "$book")
+  [[ -n "$osis" ]] || osis="${book^^}"
+  maxch=$(book_chapters "$osis")
+  [[ -n "$maxch" ]] || {
+    echo "Unknown book: $book (try an OSIS code like JHN, or a name like John)." >&2
+    return 1
+  }
+  name=$(osis_name "$osis")
+  if _hl_cache_load "$bid" "$osis" && (( ! _HL_CACHE_STALE )); then
+    echo "$name — cached $(_hl_fmt_age "$_HL_CACHE_AGE")."
+  else
+    _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
+    echo "Scanning $name ($maxch chapters)…"
+    if ! _hl_book_highlights "$bid" "$osis" "$maxch"; then
+      echo "${_HL_BOOK_ERROR:-Read failed.}" >&2
+      return 1
+    fi
+    _hl_cache_load "$bid" "$osis" || {
+      _HL_CACHE_HIGHLIGHTS="$_HL_BOOK_HIGHLIGHTS"
+      _HL_CACHE_AGE=0
+    }
+  fi
+  local n=0 t
+  for t in $_HL_CACHE_HIGHLIGHTS; do n=$((n+1)); done
+  if (( n == 0 )); then
+    echo "No highlights in $name."
+    return 0
+  fi
+  echo "$n highlight(s) in $name:"
+  _hl_print_tokens "$osis" "$_HL_CACHE_HIGHLIGHTS"
+}
+
+_hl_list_cached() {
+  # List every book currently in the local highlights cache, newest scan
+  # first, with the age of each entry and a nudge when one is stale.
+  local f osis ts age hl name n t books=0 total=0
+  local -a files=()
+  for f in "$_HL_CACHE_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+    files+=("$f")
+  done
+  if (( ${#files[@]} == 0 )); then
+    echo "No cached highlights yet. Run: bible hl scan all"
+    echo "(or scan one book: bible hl scan John)"
+    return 0
+  fi
+  local -a sorted=()
+  while IFS= read -r f; do
+    sorted+=("$f")
+  done < <(for f in "${files[@]}"; do printf '%s %s\n' "$(jq -r '.scanned_at // 0' "$f" 2>/dev/null)" "$f"; done | sort -rn | cut -d' ' -f2-)
+  for f in "${sorted[@]}"; do
+    osis=$(jq -r '.osis // empty' "$f" 2>/dev/null)
+    ts=$(jq -r '.scanned_at // 0' "$f" 2>/dev/null)
+    hl=$(jq -r '.highlights // ""' "$f" 2>/dev/null)
+    age=$(( $(date +%s) - ${ts:-0} ))
+    name=$(osis_name "$osis"); [[ -n "$name" ]] || name="$osis"
+    n=0
+    for t in $hl; do n=$((n+1)); done
+    books=$((books+1)); total=$((total+n))
+    if (( age > _HL_CACHE_TTL_MIN * 60 )); then
+      printf '%s — %d highlight(s), scanned %s (stale; refresh: bible hl scan %s)\n' "$name" "$n" "$(_hl_fmt_age "$age")" "$name"
+    else
+      printf '%s — %d highlight(s), scanned %s\n' "$name" "$n" "$(_hl_fmt_age "$age")"
+    fi
+    _hl_print_tokens "$osis" "$hl"
+    echo
+  done
+  printf '%d book(s), %d highlight(s) — cache: %s\n' "$books" "$total" "$_HL_CACHE_DIR"
+}
+
+hl_scan() {
+  # Scan chapters for highlights and (re)build the local cache. Usage:
+  #   bible hl scan <BOOK|all> [bible_id]
+  # BOOK accepts an OSIS code (JHN) or a display name (John). "all" walks
+  # every book — the full ~1,200 chapter sweep — and caches each result.
+  local what="${1:-}" bid="${2:-}"
+  if [[ -z "$what" ]]; then
+    echo "Usage: bible hl scan <BOOK|all> [bible_id]" >&2
+    echo "  e.g.: bible hl scan JHN    (or: bible hl scan all)" >&2
+    return 1
+  fi
+  _hl_read_tokens || { echo "Not logged in. Run: bible hl login" >&2; return 1; }
+  [[ -n "$bid" ]] || bid=$(_hl_default_bible_id)
+  if [[ "${what,,}" == "all" ]]; then
+    _hl_scan_all "$bid"
+    return $?
+  fi
+  local osis name maxch
+  osis=$(_hl_osis_by_name "$what")
+  [[ -n "$osis" ]] || osis="${what^^}"
+  maxch=$(book_chapters "$osis")
+  [[ -n "$maxch" ]] || { echo "Unknown book: $what (try an OSIS code like JHN, or a name like John)." >&2; return 1; }
+  name=$(osis_name "$osis")
+  echo "Scanning $name ($maxch chapters)…"
+  if ! _hl_book_highlights "$bid" "$osis" "$maxch"; then
+    echo "${_HL_BOOK_ERROR:-Read failed.}" >&2
+    return 1
+  fi
+  local n=0 t
+  for t in $_HL_BOOK_HIGHLIGHTS; do n=$((n+1)); done
+  if (( n == 0 )); then
+    echo "No highlights in $name. Cache updated."
+    return 0
+  fi
+  echo "$name — $n highlight(s), cached:"
+  _hl_print_tokens "$osis" "$_HL_BOOK_HIGHLIGHTS"
+}
+
+_hl_scan_all() {
+  # $1=bible_id. Refresh every book's cache entry, one book at a time,
+  # with a progress line per book. Failures do not stop the sweep.
+  local bid="$1" osis name maxch rest entry
+  local -a books=()
+  for entry in "${_OT[@]}" "${_NT[@]}" "${_APO[@]}"; do
+    osis=$(cut -d'|' -f1 <<<"$entry")
+    name=$(cut -d'|' -f2 <<<"$entry")
+    maxch=$(cut -d'|' -f3 <<<"$entry")
+    [[ -n "$maxch" ]] && books+=("$osis|$name|$maxch")
+  done
+  local total=${#books[@]} i=0 hlsum=0 errs=0 n t
+  printf 'Scanning %d books for highlights (bible_id %s)…\n' "$total" "$bid"
+  for entry in "${books[@]}"; do
+    i=$((i+1))
+    osis="${entry%%|*}"
+    rest="${entry#*|}"
+    name="${rest%%|*}"
+    maxch="${rest##*|}"
+    printf '[%d/%d] %-15s ' "$i" "$total" "$name"
+    if _hl_book_highlights "$bid" "$osis" "$maxch"; then
+      n=0
+      for t in $_HL_BOOK_HIGHLIGHTS; do n=$((n+1)); done
+      hlsum=$((hlsum+n))
+      printf '%d\n' "$n"
+    else
+      errs=$((errs+1))
+      printf 'failed: %s\n' "${_HL_BOOK_ERROR:-read error}"
+    fi
+  done
+  printf '\nDone: %d highlight(s) in %d book(s)' "$hlsum" "$((total-errs))"
+  (( errs > 0 )) && printf ' — %d failed (re-run: bible hl scan BOOK)' "$errs"
+  printf '\nCache: %s\n' "$_HL_CACHE_DIR"
+  (( errs == 0 ))
 }
 
 hl_add() {
@@ -1806,6 +2144,11 @@ hl_add() {
   fi
   if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
     printf 'Highlighted %s (color #%s).\n' "$pg" "$col"
+    # Keep a cached scan of this book in sync (no-op without one).
+    local pg_osis="${pg%%.*}" pg_rest="${pg#*.}"
+    if [[ "$pg_rest" == *.* ]]; then
+      _hl_cache_update_token "$bid" "$pg_osis" "${pg_rest%%.*}" "${pg_rest##*.}" "$col"
+    fi
   else
     # Show the API error detail when available
     body=$(curl -s -m 20 \
@@ -1855,6 +2198,14 @@ hl_delete() {
     printf '%s' "$body" | jq -r '.detail // .error // empty' 2>/dev/null >&2
     return 1
   fi
+  # Keep a cached scan of this book in sync (no-op without one).
+  local pg_osis="${pg%%.*}" pg_rest="${pg#*.}" pg_ch pg_vn="*"
+  if [[ "$pg_rest" == *.* ]]; then
+    pg_ch="${pg_rest%%.*}"; pg_vn="${pg_rest##*.}"
+  else
+    pg_ch="$pg_rest"
+  fi
+  _hl_cache_update_token "$bid" "$pg_osis" "$pg_ch" "$pg_vn" ""
 }
 
 _hl_chapter_colors() {
@@ -1876,7 +2227,8 @@ _hl_chapter_colors() {
       -H "Authorization: Bearer $_HL_ACCESS_TOKEN" \
       "$_YVP_HL_BASE/v1/highlights?bible_id=$1&passage_id=$2" 2>/dev/null)
   fi
-  [[ "$http_code" == "200" ]] || { rm -f "$tmpf"; return 0; }
+  # 200 = highlights listed, 204 = none in this chapter; anything else is an error.
+  [[ "$http_code" == "200" || "$http_code" == "204" ]] || { rm -f "$tmpf"; return 0; }
   body=$(cat "$tmpf" 2>/dev/null)
   rm -f "$tmpf"
   local pgid col
@@ -1905,6 +2257,10 @@ _hl_book_scan() {
   # $1=bible_id $2=osis $3=chapter count $4=access token. Fetches one
   # highlights request per chapter (parallel when curl supports it).
   # Returns 0 on success; 1 on failure with _HL_BOOK_ERROR set.
+  # Reset accumulators: on a retry after token refresh, a partial first
+  # attempt must not be counted twice (duplicate highlight tokens).
+  _HL_BOOK_HIGHLIGHTS=""
+  _HL_BOOK_HLCOUNT=""
   local bid="$1" osis="$2" maxch="$3" tok="$4" key ch
   key=$(_yvp_key) || { _HL_BOOK_ERROR="No App Key configured."; return 1; }
   local tmpd args
@@ -1997,11 +2353,15 @@ _hl_book_highlights() {
   _hl_read_tokens || { _HL_BOOK_ERROR="Not logged in. Run: bible hl login"; return 1; }
   local bid="$1" osis="$2" maxch="$3"
   if _hl_book_scan "$bid" "$osis" "$maxch" "$_HL_ACCESS_TOKEN"; then
+    _hl_cache_write "$bid" "$osis" "$_HL_BOOK_HIGHLIGHTS"
     return 0
   fi
   if _hl_token_refresh 2>/dev/null; then
     _HL_BOOK_ERROR=""
-    _hl_book_scan "$bid" "$osis" "$maxch" "$_HL_ACCESS_TOKEN" && return 0
+    if _hl_book_scan "$bid" "$osis" "$maxch" "$_HL_ACCESS_TOKEN"; then
+      _hl_cache_write "$bid" "$osis" "$_HL_BOOK_HIGHLIGHTS"
+      return 0
+    fi
   fi
   [[ -n "$_HL_BOOK_ERROR" ]] || _HL_BOOK_ERROR="Could not read highlights. Run: bible hl login"
   return 1
@@ -2047,6 +2407,19 @@ hl_status() {
     fi
   else
     echo "Tokens cached:    no"
+  fi
+  # Local highlights cache summary.
+  local f nb=0 nhl=0 hl t
+  for f in "$_HL_CACHE_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+    nb=$((nb+1))
+    hl=$(jq -r '.highlights // ""' "$f" 2>/dev/null)
+    for t in $hl; do nhl=$((nhl+1)); done
+  done
+  if (( nb > 0 )); then
+    echo "Highlights cache: $nb book(s), $nhl highlight(s) — $_HL_CACHE_DIR"
+  else
+    echo "Highlights cache: empty (run: bible hl scan all)"
   fi
 }
 
@@ -4258,9 +4631,15 @@ bible.sh — the whole Bible in one shell file.
                        "no" works too). Any catalog version can be
                        read/searched by abbreviation, e.g.
                        bible -b John 3:16 KUD
-hl | highlights      bible hl login | list | add | rm | status
+hl | highlights      bible hl login | list | scan | add | rm | status
                          One-time browser sign-in, then highlight verses.
-                         The menu (g) scans whole books for highlights.
+                         "bible hl scan <BOOK>" scans one book's chapters,
+                         "bible hl scan all" scans every book; results are
+                         cached locally (stale after ${_HL_CACHE_TTL_MIN}m,
+                         override with _HL_CACHE_TTL_MIN). "bible hl list
+                         [BOOK]" lists the cached highlights; the menu (g)
+                         browses per book, lists the cache, and can sweep
+                         every book at once.
   self-update | -u     bible self-update
                        Update this script from the GitHub repo: compares
                        the VERSION header, syntax-checks the download,
@@ -4549,10 +4928,11 @@ continue_place() {
     show_chapter "$osis" "$ch" "$ver" "$name"
     save_place "$osis|$name|$ch|$ver"
     plan_sync "$osis" "$ch" "$ver"
-    nav=$(read_key "[n]ext [p]rev [f]av [q]uit: ")
+    nav=$(read_key "[n]ext [p]rev [h]ighlight [f]av [q]uit: ")
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      h|H) read_highlight "$osis" "$name" "$ch" "$ver" "" ;;
       f|F) toggle_fav "$osis|$name|$ch|$ver" ;;
       *) return ;;
     esac
@@ -4609,7 +4989,7 @@ pick_from_list() {
   if [[ "$_HAVE_FZF" == true ]]; then
     # fzf reads items from stdin and drives its UI on /dev/tty itself.
     picked=$(printf '%s\n' "← Back" "$@" \
-      | fzf --prompt="$prompt › " --pointer="›" --border=rounded \
+      | fzf --ansi --prompt="$prompt › " --pointer="›" --border=rounded \
         --color="prompt:bold,pointer:green" --height=40% --reverse \
         --cycle || true)
     if [[ -z "$picked" || "$picked" == "← Back" ]]; then
@@ -4673,12 +5053,13 @@ browse_books() {
       bible "$name" "$ch:$ref" "$ver"
     fi
     save_place "$osis|$name|$ch|$ver"
-    nav=$(read_key "[n]ext [p]rev [v]erse [c]hapter [f]av [q]uit: ")
+    nav=$(read_key "[n]ext [p]rev [v]erse [c]hapter [h]ighlight [f]av [q]uit: ")
     case "$nav" in
       n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
       v|V) read -rp "Verse (empty = whole chapter): " ref </dev/tty ;;
       c|C) ch="" ;;
+      h|H) read_highlight "$osis" "$name" "$ch" "$ver" "$ref" ;;
       f|F) toggle_fav "$osis|$name|$ch|$ver" ;;
       *) return ;;
     esac
@@ -4761,6 +5142,130 @@ show_chapter() {
   printf "${BLUE}https://www.bible.com/bible/%s/%s.%s.%s${NC}\n\n" "$num" "$osis" "$ch" "$ver"
 }
 
+_hl_swatch() {
+  # $1 = RRGGBB → a truecolor block for menus (two spaces wide).
+  local r=$((16#${1:0:2})) g=$((16#${1:2:2})) b=$((16#${1:4:2}))
+  printf '\033[48;2;%d;%d;%dm  \033[0m' "$r" "$g" "$b"
+}
+
+_hl_pick_color() {
+  # Interactive swatch picker, like the app's highlight colors.
+  # Echoes an RRGGBB value, or empty on abort. Returns 1 on bad custom hex.
+  local -a items=()
+  local i picked col
+  for i in "${!_HL_PALETTE_HEXES[@]}"; do
+    items+=("$(_hl_swatch "${_HL_PALETTE_HEXES[$i]}") ${_HL_PALETTE_NAMES[$i]}  #${_HL_PALETTE_HEXES[$i]}")
+  done
+  items+=("Custom hex…")
+  picked=$(pick_from_list "Highlight color:" "${items[@]}") || true
+  if [[ -z "$picked" ]]; then
+    echo ""
+    return 0
+  fi
+  if [[ "$picked" == "Custom hex…" ]]; then
+    read -rp "Color hex (RRGGBB, empty = cancel): " col </dev/tty
+    col="${col#\#}"
+    col="${col,,}"
+    [[ -z "$col" ]] && { echo ""; return 0; }
+    if [[ ! "$col" =~ ^[0-9a-f]{6}$ ]]; then
+      echo "Color must be a 6-digit hex (RRGGBB)." >&2
+      return 1
+    fi
+    echo "$col"
+    return 0
+  fi
+  # Map the chosen menu label back to its hex swatch.
+  for i in "${!_HL_PALETTE_HEXES[@]}"; do
+    if [[ "$picked" == *"#${_HL_PALETTE_HEXES[$i]}" ]]; then
+      echo "${_HL_PALETTE_HEXES[$i]}"
+      return 0
+    fi
+  done
+  echo ""
+}
+
+read_highlight() {
+  # Read-flow helper: create, update, or clear a highlight for a verse.
+  # $1=OSIS $2=name $3=chapter $4=version $5=current ref (may be empty)
+  _hl_read_tokens || { echo "Not logged in. Run: bible hl login"; return 1; }
+  local osis="$1" name="$2" ch="$3" ver="$4" cur="$5"
+  local bid v pg entries existing action col fetched=0
+  version="$ver"
+  version_case
+  bid="${num:-1}"
+  # With a plain current verse, check the chapter up front: when it is
+  # already highlighted, go straight to the action menu instead of
+  # asking which verse to highlight.
+  if [[ "$cur" =~ ^[0-9]+$ ]]; then
+    entries=$(_hl_fetch_passage "$bid" "$osis.$ch") || return 1
+    fetched=1
+    existing=$(_hl_existing_color "$osis.$ch" "$cur" <<< "$entries")
+    if [[ -n "$existing" ]]; then
+      action=$(pick_from_list "$osis.$ch.$cur is highlighted (#$existing):" \
+        "Update color" "Clear highlight" "Other verse…" "Cancel")
+      case "$action" in
+        "Update color")
+          col=$(_hl_pick_color) || return 1
+          if [[ -n "$col" ]]; then
+            hl_add "$osis.$ch.$cur" "$col" "$bid" || return 1
+            _hl_chapter_colors "$bid" "$osis.$ch"
+          fi
+          return 0
+          ;;
+        "Clear highlight")
+          hl_delete "$osis.$ch.$cur" "$bid" || return 1
+          _hl_chapter_colors "$bid" "$osis.$ch"
+          return 0
+          ;;
+        "Other verse…") ;; # fall through to the verse prompt
+        *) return 0 ;;
+      esac
+    fi
+  fi
+  if [[ -n "$cur" ]]; then
+    read -rp "Highlight verse (empty = $cur, 0 = cancel): " v </dev/tty
+    [[ "$v" == "0" ]] && return 0
+    [[ -z "$v" ]] && v="$cur"
+  else
+    read -rp "Highlight verse in $name $ch (e.g. 16 or 16-18, empty = cancel): " v </dev/tty
+    [[ -z "$v" ]] && return 0
+  fi
+  v="${v// /}"
+  v="${v##*:}"
+  if ! [[ "$v" =~ ^[0-9]+([,-][0-9]+)*$ ]]; then
+    echo "Enter a verse number, range (16-18) or list (16,18)."
+    return 1
+  fi
+  pg="$osis.$ch.$v"
+  if (( ! fetched )); then
+    entries=$(_hl_fetch_passage "$bid" "$osis.$ch") || return 1
+  fi
+  existing=$(_hl_existing_color "$osis.$ch" "$v" <<< "$entries")
+  if [[ -n "$existing" ]]; then
+    action=$(pick_from_list "$pg is highlighted (#$existing):" \
+      "Update color" "Clear highlight" "Cancel")
+    case "$action" in
+      "Update color")
+        col=$(_hl_pick_color) || return 1
+        [[ -n "$col" ]] || return 0
+        hl_add "$pg" "$col" "$bid" || return 1
+        ;;
+      "Clear highlight")
+        hl_delete "$pg" "$bid" || return 1
+        ;;
+      *) return 0 ;;
+    esac
+  else
+    action=$(pick_from_list "$pg is not highlighted:" "Create highlight" "Cancel")
+    [[ "$action" == "Create highlight" ]] || return 0
+    col=$(_hl_pick_color) || return 1
+    [[ -n "$col" ]] || return 0
+    hl_add "$pg" "$col" "$bid" || return 1
+  fi
+  # Keep this chapter's inline verse markers current.
+  _hl_chapter_colors "$bid" "$osis.$ch"
+}
+
 # --- Menus -----------------------------------------------------------
 toggle_fav() {
   # $1 = "osis|name|chapter|version" — toggles the favorites shelf.
@@ -4828,14 +5333,25 @@ _hl_pick_book() {
 }
 
 _hl_browse_book() {
-  # $1=bible_id $2=osis $3=name $4=version — scan every chapter in the
-  # book for highlights, then list the chapters that have some.
+  # $1=bible_id $2=osis $3=name $4=version — list the chapters of a book
+  # that have highlights, then open one. Uses a fresh local cache entry
+  # when available; otherwise scans (which caches the result).
   local bid="$1" osis="$2" name="$3" ver="$4" maxch
   maxch=$(book_chapters "$osis")
   [[ -n "$maxch" ]] || { echo "Don't know the chapter count for $name."; pause; return; }
-  echo "Scanning $name ($maxch chapters)…"
-  _hl_book_highlights "$bid" "$osis" "$maxch"
-  if [[ -z "$_HL_BOOK_HIGHLIGHTS" ]]; then
+  if _hl_cache_load "$bid" "$osis" && (( ! _HL_CACHE_STALE )); then
+    echo "Using cached highlights for $name (scanned $(_hl_fmt_age "$_HL_CACHE_AGE"))."
+  else
+    echo "Scanning $name ($maxch chapters)…"
+    _hl_book_highlights "$bid" "$osis" "$maxch"
+    if _hl_cache_load "$bid" "$osis"; then
+      :  # scan succeeded; the fresh entry is already in the cache
+    else
+      _HL_CACHE_HIGHLIGHTS="$_HL_BOOK_HIGHLIGHTS"
+      _HL_CACHE_COUNTS="$_HL_BOOK_HLCOUNT"
+    fi
+  fi
+  if [[ -z "$_HL_CACHE_HIGHLIGHTS" ]]; then
     if [[ -n "$_HL_BOOK_ERROR" ]]; then
       echo "$_HL_BOOK_ERROR"
     else
@@ -4846,7 +5362,7 @@ _hl_browse_book() {
   fi
   local -a labels=()
   local pair chN cnt
-  for pair in $_HL_BOOK_HLCOUNT; do
+  for pair in $_HL_CACHE_COUNTS; do
     chN="${pair%%=*}"; cnt="${pair#*=}"
     labels+=("$name $chN   ($cnt)")
   done
@@ -4884,8 +5400,8 @@ _hl_browse_chapter() {
 }
 menu_highlights() {
   # Browse your highlights: pick a book (or the one you're reading) and
-  # scan all its chapters for highlighted verses, or jump straight to the
-  # current chapter's highlights.
+  # scan all its chapters for highlighted verses, jump straight to the
+  # current chapter's highlights, list the cache, or sweep every book.
   _hl_read_tokens || {
     echo "You're not signed in to YouVersion yet."
     echo "Run: bible hl login   (one-time browser sign-in)"
@@ -4904,6 +5420,8 @@ menu_highlights() {
     picks+=("Browse ${name:-$osis} by highlights")
   fi
   picks+=("Pick a book…")
+  picks+=("List all cached highlights")
+  picks+=("Scan all books (full Bible sweep)")
   if [[ -n "$osis" && -n "$ch" ]]; then
     picks+=("Highlights in ${name:-$osis} $ch")
   fi
@@ -4916,6 +5434,14 @@ menu_highlights() {
       bosis=$(_hl_pick_book) || return
       bname=$(osis_name "$bosis")
       _hl_browse_book "$bid" "$bosis" "$bname" "$ver"
+      ;;
+    "List all cached highlights")
+      hl_list
+      pause
+      ;;
+    "Scan all books (full Bible sweep)")
+      _hl_scan_all "$bid"
+      pause
       ;;
     "Highlights in "*)
       _hl_browse_chapter "$bid" "$osis" "$name" "$ch" "$ver"
@@ -4976,10 +5502,11 @@ plan_read() {
     show_chapter "$osis" "$ch" "$ver" "$name"
     save_place "$osis|$name|$ch|$ver"
     plan_sync "$osis" "$ch" "$ver"
-    nav=$(read_key "[n]ext [p]rev [f]av [q]uit: ")
+    nav=$(read_key "[n]ext [p]rev [h]ighlight [f]av [q]uit: ")
     case "$nav" in
       n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
       p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
+      h|H) read_highlight "$osis" "$name" "$ch" "$ver" "" ;;
       f|F) toggle_fav "$osis|$name|$ch|$ver" ;;
       *) return ;;
     esac
@@ -5556,6 +6083,7 @@ if [[ $# -gt 0 ]]; then
         config) shift; _hl_configure_prompt; _hl_config_save; echo "Saved to ~/.credentials/.bible_yvp_oauth and ~/.credentials/.bible.com_token." ;;
         approve) shift; hl_approve ;;
         list) shift; hl_list "$@" ;;
+        scan) shift; hl_scan "$@" ;;
         add) shift; hl_add "$@" ;;
         delete|rm) shift; hl_delete "$@" ;;
         *) hl_status ;;
