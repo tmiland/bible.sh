@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [1.3.0] - 2026-10-07
 
 ### Added
 - **Full API catalog support**: every version licensed to the app key
