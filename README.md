@@ -26,7 +26,7 @@ command away.
   script. No install, no packages, no bloat. If you have a terminal,
   you have a Bible.
 - **📖 The whole Bible at your fingertips** — an interactive frontend
-  for Read, Search, Compare, Listen, Verse of the Day, Translate,
+  for Read, Search, Compare, Verse of the Day, Translate,
   Version picker, Offline and Help, plus a dead-simple CLI.
 - **📜 Every version, side by side** — compare *any* translations in
   one view: `bible -c John 3:16 KJV NIV NLT NKJV ESV`. Or a preset
@@ -37,11 +37,10 @@ command away.
   and your highlighted verses appear inline while you read, color-coded
   per chapter (OAuth PKCE, one login, no registration).
 - **✨ A proverb a day** — Proverbs has exactly 31 chapters for the 31 days
-  of the month. Read it or listen to it, every day, right where you left off.
-- **📘 Reading plans** — pick a starting point like *Psalm 65*, and Read
-  and Listen stay in perfect step: `Continue` always resumes your spot,
-  whether you
-  read or heard it last.
+  of the month. Read it every day, right where you left off.
+- **📘 Reading plans** — pick a starting point like *Psalm 65*; `Continue`
+  always resumes your spot, whether you read it yesterday or left it
+  mid-chapter.
 - **🔍 References that just work** — `2 Timoteus 1:2`, `2 Timoteus 1 2`,
   ranges, no-colon, spaces or not — type it the way you think it.
 - **⌨️ Made for your keyboard** — arrow-key navigation, single-letter
@@ -87,7 +86,7 @@ continue-reading and the interactive menu:
 bible
 ```
 
-**The CLI** — run with arguments for verse, search, compare, listen,
+**The CLI** — run with arguments for verse, search, compare,
 translate …:
 
 ```shell
@@ -116,7 +115,6 @@ https://www.bible.com/bible/1/ISA.54.17.KJV
 | `--bible` \| `-b` | `bible -b Isaiah 54:17 KJV` |
 | `--search` \| `-s` | `bible -s "keyword" KJV` |
 | `--votd` \| `-v` | `bible -v` |
-| `--listen` \| `-l` | `bible -l Isaiah 54 KJV` |
 | `--compare` \| `-c` | `bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV` |
 | `--translate` \| `-t` | `bible -t Isaiah 54:17 hebrew en` |
 | `install` | `bible install [VERSION] [--all]` |
@@ -163,7 +161,7 @@ it does.
 
 ### 📖 Flexible reference parsing
 
-`-b`, `-c`, `-l` and `-t` parse references flexibly — colon or space,
+`-b`, `-c` and `-t` parse references flexibly — colon or space,
 with or without a space after a numbered book, single verses or ranges:
 
 ```shell
@@ -227,7 +225,7 @@ interactive menu, open Verse of the Day and press `c` (cronjob) or
 
 The King James Version is fully readable, searchable and comparable
 **offline**. `bible install KJV` downloads the public-domain text once;
-after that every `-b`, `-s`, `-c` and frontend Read/Listen lookup for
+after that every `-b`, `-s`, `-c` and frontend Read lookup for
 KJV uses the local database.
 
 ```shell
@@ -284,15 +282,13 @@ to check at every launch). To skip the check entirely:
 
 Proverbs has exactly 31 chapters — one for each day of the month — so
 the app picks the chapter matching today's date. **Read** reads it
-(also `bible proverb`); **Listen** plays it:
+(also `bible proverb`):
 
 ```shell
 Read → "A proverb a day"      # reads today's chapter
-Listen → "A proverb a day"    # plays it as audio + verses
 ```
 
-Reading records it as your reading spot (Continue picks it up); either
-way you pick up where you left off.
+Reading records it as your reading spot (Continue picks it up).
 
 ---
 
@@ -306,22 +302,18 @@ Read → "Add a reading plan" → Psalm 65
 Reading plan: Psalm 65 (KJV).
 ```
 
-It opens at that chapter and — from then on — **Read** and **Listen**
-are split cleanly:
+It opens at that chapter and — from then on — **Read** remembers your
+spot:
 
-- Both open with **`Continue reading plan: Psalm 66`** — straight back
-  into your most recent plan, read or listened as appropriate.
-- **Read** shows plans for reading; move on with `[n]ext` / `[p]rev`
+- It opens with **`Continue reading plan: Psalm 66`** — straight back
+  into your most recent plan.
+- Plans show the current chapter; move on with `[n]ext` / `[p]rev`
   (or the `→` / `←` arrow keys), stop anywhere.
-- **Listen** mirrors the same list for audio; each chapter plays and
-  offers the same forward/back (then quits).
-- Both keep the plan in step: wherever you quit/leave/go back becomes the
-  continuation, the plan listing shows the current chapter, and the index
-  `Continue: Psalm 66` resumes the same spot either way.
+- Wherever you quit/leave/go back becomes the continuation, and the
+  index `Continue: Psalm 66` resumes the same spot.
 
-The **Lord's prayer** sits in both lists too — Read shows Matthew 6:9-13,
-Listen plays it. One plan per book; remove any from
-**Read → "Remove a reading plan"**.
+The **Lord's prayer** sits in the list too — Read shows Matthew 6:9-13.
+One plan per book; remove any from **Read → "Remove a reading plan"**.
 
 Plans live in `~/.cache/bible/plans` (one `name|osis|chapter|version`
 line per book).
@@ -373,7 +365,7 @@ bible hl add JHN.3.16   # highlight a verse — pick a color from swatches, or p
 bible hl rm  JHN.3.16   # clear the highlight on that verse
 ```
 
-While you read or listen to a chapter, highlighted verses are **marked
+While you read a chapter, highlighted verses are **marked
 inline with a colored ●** so you can see at a glance which verses you've
 underlined on the bright side. Pressing `h` while reading acts on the
 verse you're on — if it's already highlighted, the menu offers Update

@@ -6,7 +6,7 @@
 ####                            bible                             ####
 ####   Single-file interactive Bible app and CLI — browse the      ####
 ####   Bible like an app: menus for Read, Search, Compare,         ####
-####   Listen, VOTD, Translate.  Run with args directly:           ####
+####   VOTD, Translate.  Run with args directly:                   ####
 ####   bible -b John 3:16 KJV                                      ####
 ######################################################################
 #   wget -q https://github.com/tmiland/bible.sh/raw/main/bible.sh -O ~/.scripts/bible.sh
@@ -3501,35 +3501,6 @@ _yv_chapter_html() {
   ' 2>/dev/null
 }
 
-_yvp_chapter_html() {
-  # $1 = Platform API bible id, $2 = USFM reference (e.g. JHN.3).
-  # Echo the chapter markup from the licensed Platform API
-  # (format=html) and set $page_h1 to the localized heading. The API
-  # marks each verse with an empty yv-v span plus a yv-vlbl label
-  # instead of a data-usfm wrapper, so rebuild one __verse/__content
-  # span per verse for the parsers below; tags nested in the text
-  # (words of Jesus) are stripped first so the content span holds
-  # plain text and no inner </span> can truncate extraction.
-  local body
-  body=$(_yvp_api_get "$_YVP_API/bibles/$1/passages/$2?format=html") || return 1
-  page_h1=$(printf '%s' "$body" | jq -r '.reference // empty' 2>/dev/null)
-  printf '%s' "$body" | jq -r --arg prefix "$2." '
-    (.content // empty) as $c
-    | if $c == "" then empty
-      else
-        [ $c | splits("<span class=\"yv-v\" v=\"") ] | .[1:]
-        | map(
-            try (
-              capture("^(?<v>[0-9]+)\"></span><span class=\"yv-vlbl\">[0-9]+</span>(?<t>.*)$"; "s")
-              | .t |= (gsub("<[^>]*>"; "") | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" "))
-              | "<span class=\"verse__verse\" data-usfm=\"\($prefix)\(.v)\"><span class=\"verse__content\">\(.t)</span></span>"
-            ) catch empty
-          )
-        | join("\n")
-      end
-  ' 2>/dev/null
-}
-
 get_bible_chapter() {
   # tmpfile — the chapter JSON carries every verse as
   # <span data-usfm="BOOK.CH.VERSE">, so one fetch serves single
@@ -3830,172 +3801,6 @@ bible() {
     fi
     output "$description" "$book" "$chapter_verse" "$version" "$link"
   fi
-}
-
-audio_seek() {
-  # $1=web version num, $2=USFM ref "GEN.1", $3=verse or "V1-V2",
-  # $4=CDN mp3 filename (optional, to pick the matching narrator)
-  # Echoes "<start> <end>" seconds into the chapter mp3, or nothing.
-  local num="$1" ref="$2" sel="$3" fname="$4"
-  local v1="${sel%-*}" v2="${sel#*-}" timing st en
-  timing=$(curl -s "http://audio-bible.youversionapi.com/3.1/chapter.json?version_id=$num&reference=$ref")
-  [[ -n "$timing" ]] || return 1
-  if [[ -n "$fname" ]]; then
-    st=$(jq -r --arg f "$fname" --arg u "$ref.$v1" '
-      .response.data[]? as $d |
-      select(($d.download_urls.format_mp3_32k // "") | contains($f)) |
-      $d.timing[]? | select(.usfm == $u) | .start' <<<"$timing" | head -n 1)
-    en=$(jq -r --arg f "$fname" --arg u "$ref.$v2" '
-      .response.data[]? as $d |
-      select(($d.download_urls.format_mp3_32k // "") | contains($f)) |
-      $d.timing[]? | select(.usfm == $u) | .end' <<<"$timing" | head -n 1)
-  fi
-  if [[ -z "$st" ]]; then
-    st=$(jq -r --arg u "$ref.$v1" \
-      '.response.data[0].timing[]? | select(.usfm == $u) | .start' <<<"$timing" | head -n 1)
-  fi
-  if [[ -z "$en" ]]; then
-    en=$(jq -r --arg u "$ref.$v2" \
-      '.response.data[0].timing[]? | select(.usfm == $u) | .end' <<<"$timing" | head -n 1)
-  fi
-  if [[ -n "$st" && -n "$en" ]]; then
-    echo "$st $en"
-  fi
-}
-
-listen() {
-  local num= seek_start= seek_end= audio_json audio_title listen_ref api_id
-  args "$@"
-  version_case
-  book_case
-
-  if ! command -v jq >/dev/null 2>&1; then
-    echo "jq not installed..."
-    return 1
-  fi
-
-  # Audio metadata from the YouVersion JSON API:
-  # the default recording's 32k mp3 URL plus its title.
-  audio_json=$(curl -s \
-    --compressed \
-    -H 'Accept: application/json' \
-    "https://audio-bible.youversionapi.com/3.1/chapter.json?version_id=$num&reference=$bible_book.$chapter") || true
-
-  listen_mp3_url=$(
-    printf '%s' "$audio_json" | jq -r '
-      (.response.data // empty)
-      | if type == "array" then . else empty end
-      | map(select(.download_urls.format_mp3_32k != null))
-      | (map(select(.default == true))[0] // .[0])
-      | .download_urls.format_mp3_32k // empty
-    ' 2>/dev/null
-  )
-  [[ "$listen_mp3_url" == //* ]] && listen_mp3_url="https:$listen_mp3_url"
-
-  if [ -z "$listen_mp3_url" ]; then
-    echo "No audio found for $bible_book_name $chapter $version"
-    exit 0
-  fi
-
-  # Localized reference ("Johannes 3") and chapter markup, one fetch
-  # feeding both the headline and the numbered text below: licensed
-  # Platform API (format=html) when the version is licensed, else the
-  # keyless chapter JSON API (see _yvp_chapter_html/_yv_chapter_html).
-  listen_text_tmp=$(mktemp)
-  tmp_files+=("$listen_text_tmp")
-  if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]] \
-     && _yvp_chapter_html "$api_id" "$bible_book.$chapter" > "$listen_text_tmp" \
-     && [[ -s "$listen_text_tmp" ]]; then
-    : # licensed Platform API
-  else
-    _yv_chapter_html "$num" "$bible_book.$chapter" > "$listen_text_tmp"
-  fi
-  listen_ref="${page_h1:-$bible_book_name $chapter}"
-
-  audio_title=$(printf '%s' "$audio_json" | jq -r '
-    (.response.data // empty)
-    | if type == "array" then . else empty end
-    | (map(select(.default == true))[0] // .[0])
-    | .title // empty
-  ' 2>/dev/null)
-
-  listen_mp3_headline="Audio Bible: Listen to $listen_ref"
-  [[ -n "$audio_title" ]] && listen_mp3_headline+=" — $audio_title"
-
-  listen_mp3_link="https://www.bible.com/audio-bible/$num/$bible_book.$chapter.$version"
-
-  listen_mp3_filename=$(
-    echo "$listen_mp3_url" |
-    awk -F '/' '{print $7}' |
-    sed "s|?version_id=[0-9]*||g"
-  )
-
-  if [[ -n $(command -v 'vlc') ]]
-  then
-    player=(vlc --play-and-exit)
-  elif [[ -n $(command -v 'ffplay') ]]
-  then
-    player=(ffplay -autoexit -nodisp -loglevel quiet)
-  else
-    echo "vlc or ffplay not installed..."
-    exit 0
-  fi
-
-  # Verse-seek: when a verse (or range) is requested, play only that
-  # span of the chapter mp3 using the YouVersion audio timing API.
-  if [[ -n "$verse" ]]; then
-    read -r seek_start seek_end <<< "$(audio_seek "$num" "$bible_book.$chapter" "$verse" "$listen_mp3_filename")"
-    if [[ -n "$seek_start" ]]; then
-      if [[ "${player[0]}" == vlc ]]; then
-        player+=(--start-time="$seek_start" --stop-time="$seek_end")
-      else
-        player+=(-ss "$seek_start" -t "$(awk "BEGIN{printf \"%.2f\", $seek_end - $seek_start}")")
-      fi
-    fi
-  fi
-
-  # Stream the chapter mp3 straight from the YouVersion CDN — nothing
-  # is written to disk.  Verse seeking above still applies: both
-  # players can seek within the HTTP stream.
-  "${player[@]}" "$listen_mp3_url" >/dev/null 2>&1 &
-
-  printf "\n"
-  echo -n "$listen_mp3_headline"
-  printf "\n"
-  printf "\n"
-  # Numbered verses via the local database when available; otherwise
-  # from the chapter JSON fetched above (see _yv_chapter_html).  When
-  # a verse (or range) was given, only the selected verses are shown.
-  local local_usfms vstart vend v vtext
-  _hl_chapter_colors "$num" "$bible_book.$chapter"
-  local_usfms=$(local_chapter_verses "$bible_book" "$chapter" "$version" 2>/dev/null)
-  if [[ -n "$local_usfms" ]]; then
-    if [[ -n "$verse" ]]; then
-      vstart="${verse%-*}"
-      vend="${verse#*-}"
-      for (( v=vstart; v<=vend; v++ )); do
-        vtext=$(local_verse "$bible_book" "$chapter" "$v" "$version")
-        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
-      done
-    else
-      local_chapter_text "$bible_book" "$chapter" "$version"
-    fi
-  elif [[ -n "$(chapter_usfms "$listen_text_tmp" "$bible_book.$chapter")" ]]; then
-    if [[ -n "$verse" ]]; then
-      vstart="${verse%-*}"
-      vend="${verse#*-}"
-      for (( v=vstart; v<=vend; v++ )); do
-        vtext=$(verse_text "$listen_text_tmp" "$bible_book.$chapter.$v")
-        [[ -n "$vtext" ]] && printf "\n${BOLD}%s${NC}%s %s\n" "$v" "$(_hl_verse_mark "$v")" "$(echo "$vtext" | fold -w ${width} -s)"
-      done
-    else
-      chapter_text "$listen_text_tmp" "$bible_book.$chapter"
-    fi
-  fi
-  printf "\n"
-  printf "\n"
-  echo "$listen_mp3_link"
-  printf "\n"
 }
 
 # --- VOTD schedule and Telegram notifications ------------------------
@@ -4578,10 +4383,10 @@ usage() {
 bible.sh — the whole Bible in one shell file.
 
   Run with no arguments for the interactive app: Read (Continue,
-  proverb-a-day, reading plans, the Lord's prayer), Listen (its audio
-  mirror), Search, Compare, Verse of the Day, Translate, Version,
-  Offline and Help. Arrow keys →/← work like [n]ext/[p]rev in every
-  chapter loop; Enter resumes Continue; update hints show in the header.
+  proverb-a-day, reading plans, the Lord's prayer), Search, Compare,
+  Verse of the Day, Translate, Version, Offline and Help. Arrow keys
+  →/← work like [n]ext/[p]rev in every chapter loop; Enter resumes
+  Continue; update hints show in the header.
 
   Arguments            Example usage
   --help      | -h     Show this help.
@@ -4599,7 +4404,6 @@ bible.sh — the whole Bible in one shell file.
   proverb              bible proverb
                        Read today's chapter of Proverbs (31 chapters,
                        one per day; menu: Read → "A proverb a day").
-  --listen    | -l     bible -l Isaiah 54 KJV
   --compare   | -c     bible -c Isaiah 54:17 KJV NIV NLT NKJV ESV
                        or bible -c Isaiah 54:17 [en|no]
   --saved     | -a     bible saved
@@ -5065,57 +4869,6 @@ browse_books() {
     esac
   done
 }
-# Audio-browse a Testament: pick book → chapter (optional verse), play
-# the audio, then [n]ext / [p]rev / [c]hapter. Wherever you stop becomes
-# the reading spot too (Continue + plans pick up the same place).
-listen_browse() {
-  # $1 = array name holding OSIS|Name|Chapters entries, $2 = version.
-  local -n _books=$1
-  local ver="$2" entry osis name maxch ch ref nav
-  local -a names
-  names=()
-  for entry in "${_books[@]}"; do
-    names+=("$(cut -d'|' -f2 <<<"$entry")")
-  done
-  entry=$(pick_from_list "Books:" "${names[@]}")
-  [[ -z "$entry" ]] && return
-  for e in "${_books[@]}"; do
-    if [[ "$(cut -d'|' -f2 <<<"$e")" == "$entry" ]]; then
-      entry="$e"
-      break
-    fi
-  done
-  osis="$(cut -d'|' -f1 <<<"$entry")"
-  name="$(cut -d'|' -f2 <<<"$entry")"
-  maxch="$(cut -d'|' -f3 <<<"$entry")"
-  ch=""
-  while true; do
-    if [[ -z "$ch" ]]; then
-      read -rp "$name has $maxch chapters. Chapter (1-$maxch, 0=back): " ch </dev/tty
-      [[ "$ch" == "0" ]] && return
-      if ! [[ "$ch" =~ ^[0-9]+$ ]] || ((ch < 1 || ch > maxch)); then
-        echo "Enter a chapter between 1 and $maxch."
-        ch=""
-        continue
-      fi
-      read -rp "Verse (empty = whole chapter): " ref </dev/tty
-    fi
-    if [[ -z "$ref" ]]; then
-      listen "$name" "$ch" "$ver"
-    else
-      listen "$name" "$ch:$ref" "$ver"
-    fi
-    save_place "$osis|$name|$ch|$ver"
-    nav=$(read_key "[n]ext [p]rev [v]erse [c]hapter [q]uit: ")
-    case "$nav" in
-      n|N) ((ch < maxch)) && ((ch++)) || echo "Last chapter."; ref="" ;;
-      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter."; ref="" ;;
-      v|V) read -rp "Verse (empty = whole chapter): " ref </dev/tty ;;
-      c|C) ch="" ;;
-      *) return ;;
-    esac
-  done
-}
 
 show_chapter() {
   # $1=OSIS $2=chapter $3=version $4=display name (optional)
@@ -5123,7 +4876,7 @@ show_chapter() {
   version="$ver"
   version_case
   # Fetch the highlight colors for this chapter so highlighted verses
-  # get marked inline during the read/listen loop.
+  # get marked inline during the read loop.
   _hl_chapter_colors "$num" "$osis.$ch"
   # Offline-first: render from the local database when installed.
   if [[ "$ver" == "KJV" ]] && _offline_is_installed "KJV"; then
@@ -5534,28 +5287,6 @@ plan_add() {
   plan_read "$(osis_name "$bible_book")|$bible_book|$ch|$ver"
 }
 
-plan_listen() {
-  # Listen through the plan: plays the current chapter's audio, then
-  # [n]ext / [p]rev / [q]uit. Wherever you stop becomes the plan's
-  # position and the index Continue spot.
-  local line name osis ch ver maxch nav
-  line="$1"
-  IFS='|' read -r name osis ch ver <<< "$line"
-  ver="${ver:-$DEF_VERSION}"
-  maxch=$(book_chapters "$osis")
-  while true; do
-    listen "$name" "$ch" "$ver"
-    save_place "$osis|$name|$ch|$ver"
-    plan_sync "$osis" "$ch" "$ver"
-    nav=$(read_key "[n]ext [p]rev [q]uit: ")
-    case "$nav" in
-      n|N) if [[ -n "$maxch" ]] && ((ch < maxch)); then ((ch++)); else echo "Last chapter."; fi ;;
-      p|P) ((ch > 1)) && ((ch--)) || echo "First chapter." ;;
-      *) return ;;
-    esac
-  done
-}
-
 plan_remove() {
   local -a labels lines
   local line i pick p
@@ -5586,7 +5317,7 @@ plan_remove() {
 }
 
 menu_read() {
-  local choice day pl pn po pc pv
+  local choice day pl pn pc
   local -a labels lines picks
   local line i name osis ch ver
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
@@ -5604,7 +5335,7 @@ menu_read() {
   pl=""
   if [[ -s "$plan_file" ]]; then
     pl="$(tail -1 "$plan_file")"
-    [[ -n "$pl" ]] && IFS='|' read -r pn po pc pv <<< "$pl"
+    [[ -n "$pl" ]] && IFS='|' read -r pn _ pc _ <<< "$pl"
   fi
   if [[ -n "$pl" ]]; then
     picks+=("Continue reading plan: $pn $pc")
@@ -5641,7 +5372,6 @@ menu_read() {
 menu_proverb() {
   # "A proverb a day": read the chapter of Proverbs matching today's
   # date — Proverbs has exactly 31 chapters, one per day of the month.
-  # Audio lives in the Listen section ("A proverb a day" there).
   local day osis="PRO"
   day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
   if ! [[ "$day" =~ ^[0-9]+$ ]] || ((day < 1 || day > 31)); then
@@ -5745,63 +5475,6 @@ menu_compare() {
   # shellcheck disable=SC2086
   compare $ref ${vers:-$DEF_VERSION}
   pause
-}
-
-menu_listen() {
-  # The audio mirror of the Read section: proverb, reading plans, and
-  # the whole Bible browsed by book. Wherever you stop becomes the
-  # reading spot too, so Read and Listen pick up the same place.
-  local choice day pl pn po pc pv
-  local -a labels lines picks
-  local line i name osis ch ver
-  day=$(date +%-d 2>/dev/null || date +%e); day=${day// /}
-  labels=(); lines=(); picks=()
-  if [[ -f "$plan_file" ]]; then
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
-      IFS='|' read -r name osis ch ver <<< "$line"
-      labels+=("$name $ch")
-      lines+=("$line")
-    done < "$plan_file"
-  fi
-  # The reading plan starts where you last listened: a "Continue
-  # reading plan" shortcut for the most recently active plan.
-  pl=""
-  if [[ -s "$plan_file" ]]; then
-    pl="$(tail -1 "$plan_file")"
-    [[ -n "$pl" ]] && IFS='|' read -r pn po pc pv <<< "$pl"
-  fi
-  if [[ -n "$pl" ]]; then
-    picks+=("Continue reading plan: $pn $pc")
-  fi
-  picks+=("A proverb a day (Proverbs $day)" \
-    "The Lord's prayer (Matthew 6:9-13)" \
-    "${labels[@]}" \
-    "Old Testament" "New Testament" "Apocrypha (KJVAAE)")
-  choice=$(pick_from_list "Listen:" "${picks[@]}")
-  case "$choice" in
-    "Continue reading plan: $pn $pc") plan_listen "$pl" ;;
-    "A proverb a day (Proverbs $day)")
-      listen "Proverbs" "$day" "$DEF_VERSION"
-      save_place "PRO|Proverbs|$day|$DEF_VERSION"
-      pause
-      ;;
-    "The Lord's prayer (Matthew 6:9-13)")
-      listen "Matthew" "6:9-13" "$DEF_VERSION"
-      pause
-      ;;
-    "Old Testament") listen_browse _OT "$DEF_VERSION" ;;
-    "New Testament") listen_browse _NT "$DEF_VERSION" ;;
-    "Apocrypha (KJVAAE)") listen_browse _APO KJVAAE ;;
-    *)
-      for i in "${!labels[@]}"; do
-        if [[ "${labels[$i]}" == "$choice" ]]; then
-          plan_listen "${lines[$i]}"
-          return
-        fi
-      done
-      ;;
-  esac
 }
 
 pick_target() {
@@ -5989,9 +5662,9 @@ main_menu() {
       actions+=(continue_place)
       labels+=("$item")
     fi
-    keys+=(a r f g s m l v t e o h)
-    actions+=(menu_saved menu_read menu_favorites menu_highlights menu_search menu_compare menu_listen menu_votd menu_translate menu_version menu_offline menu_help)
-    labels+=("Are you saved?" "Read" "Favorites" "Highlights" "Search" "Compare" "Listen" "Verse of the Day" "Translate" "Version" "Offline" "Help")
+    keys+=(a r f g s m v t e o h)
+    actions+=(menu_saved menu_read menu_favorites menu_highlights menu_search menu_compare menu_votd menu_translate menu_version menu_offline menu_help)
+    labels+=("Are you saved?" "Read" "Favorites" "Highlights" "Search" "Compare" "Verse of the Day" "Translate" "Version" "Offline" "Help")
     # One compact bar: single keypress, no scrolling. Items wrap at the
     # terminal width (default 80) so long labels never mid-word overflow.
     local w _lab _plain _used
@@ -6062,7 +5735,6 @@ if [[ $# -gt 0 ]]; then
       exit "$_votd_rc"
       ;;
     -v) shift; votd "$@" ;;
-    --listen | -l) shift; listen "$@" ;;
     --compare | -c) shift; compare "$@" ;;
     --saved | -a | saved) shift; witness_saved "$@" ;;
     --translate | -t) shift; translate "$@" ;;

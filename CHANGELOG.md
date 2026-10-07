@@ -6,8 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Added
 - **Full API catalog support**: every version licensed to the app key
-  (1,400+ across all languages) now works with `-b`, `-s`, `-c` and
-  `-l` without hardcoding. `version_case` falls back to the cached
+  (1,400+ across all languages) now works with `-b`, `-s` and `-c`
+  without hardcoding. `version_case` falls back to the cached
   Platform API catalog (`~/.cache/bible/catalog.tsv`, TSV of
   id / localized abbreviation / language tag, refreshed after
   `_YVP_CATALOG_TTL_MIN`, default 1440 min). New `bible versions [LANG]`
@@ -44,22 +44,18 @@ All notable changes to this project are documented in this file.
 - **A proverb a day**: Read → "A proverb a day" opens the chapter of
   Proverbs matching today's date (31 chapters ↔ 31 days); reading
   records the reading spot (Continue picks it up). Also `bible proverb`.
-- **The Lord's prayer**: one pick in Read (shows Matthew 6:9-13) or
-  Listen (plays the verse-range audio).
+- **The Lord's prayer**: one pick in Read (shows Matthew 6:9-13).
 - **Reading plans**: Read → "Add a reading plan" (e.g. `Psalm 65`)
-  starts a plan at that chapter. Read and Listen are split: **Read**
-  shows plans for reading, **Listen** mirrors the list for audio, and
-  both keep the same position — wherever you quit/leave/go back becomes
-  the continuation, the plan listing shows the current chapter, and the
-  index's `Continue` resumes it either way. One plan per book
-  (`~/.cache/bible/plans`, lines `name|osis|chapter|version`); remove
-  via Read → "Remove a reading plan".
+  starts a plan at that chapter. Read shows the plans; wherever you
+  quit/leave/go back becomes the continuation, the plan listing shows
+  the current chapter, and the index's `Continue` resumes it. One plan
+  per book (`~/.cache/bible/plans`, lines `name|osis|chapter|version`);
+  remove via Read → "Remove a reading plan".
 - **Arrow-key navigation**: `→`/`←` act as `[n]ext`/`[p]rev` in every
-  chapter loop (Continue spot, Read browse, Listen browse, plan read,
-  plan listen).
-- **Continue reading plan**: Read and Listen open with a
+  chapter loop (Continue spot, Read browse, plan read).
+- **Continue reading plan**: Read opens with a
   `Continue reading plan: <name> <ch>` shortcut for the most recently
-  active plan, jumping straight back into reading/listening it.
+  active plan, jumping straight back into reading it.
 - **Index layout**: the home hotkey bar wraps at the terminal width
   (default 80 columns) so longer labels never mid-word overflow.
 - **Highlights login**: aligned with the current YouVersion OAuth spec —
@@ -78,7 +74,7 @@ All notable changes to this project are documented in this file.
   YouVersion highlights API (per-chapter colors). `bible hl list <chapter>`
   shows each highlighted verse and its color; `bible hl add <verse> [color]`
   and `bible hl rm <verse>` create/clear highlights (colors are `RRGGBB`).
-  While reading or listening to a chapter, highlighted verses are marked
+  While reading a chapter, highlighted verses are marked
   inline with a colored ●. The menu Highlights entry (`g`) is now a
   **highlights browser**: scan the book you're reading — or any book —
   for every chapter that has highlights and open any chapter with the
@@ -123,15 +119,11 @@ All notable changes to this project are documented in this file.
   "Custom hex…" for anything else. The hex argument still works
   non-interactively, and the old default (`5dff79`) is no longer
   needed for new highlights.
-- **Chapter reads and `--listen` no longer scrape bible.com HTML**: both
-  now use the YouVersion JSON APIs —
+- **Chapter reads no longer scrape bible.com HTML**: they now use the
+  YouVersion JSON API —
   `bible.youversionapi.com/3.1/chapter.json` for verse text (single
   verses, ranges and whole chapters from one keyless fetch; verses are
-  located by `<span data-usfm>`), and
-  `audio-bible.youversionapi.com/3.1/chapter.json` for the default
-  recording (mp3 URL + title; the audio is streamed straight from the
-  CDN and the local `~/Audio/Listen Bible` mp3 cache is gone, while
-  `audio_seek` still resolves the verse start). The localized chapter
+  located by `<span data-usfm>`). The localized chapter
   heading ("Johannes 3") now comes from the chapter JSON. Output is
   byte-identical to the old parser
   (verified against whole chapters, ranges and accented text); when a
@@ -148,6 +140,12 @@ All notable changes to this project are documented in this file.
   directly — Update color / Clear highlight / **Other verse…** / Cancel —
   instead of asking which verse to highlight and only then revealing
   that it was already highlighted.
+
+### Removed
+
+- **Listen / audio playback**: the Listen menu section (browse and plan
+  audio) and the `--listen` / `-l` CLI flag were removed. Reading,
+  reading plans, proverbs and highlights are unaffected.
 
 ## [1.2.0] - 2026-09-15
 
