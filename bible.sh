@@ -4050,15 +4050,26 @@ votd() {
     echo "jq not installed..."
     return 1
   fi
-  # Parse the VOTD response (bible.com sends it in .response.data.arrayOfVerses)
-  votd_content=$(jq -r '.response.data.arrayOfVerses[0].verses[0].content // empty' "$votd_tmp" | tr '\n' ' ')
-  votd_title=$(jq -r '.response.data.arrayOfVerses[0].verses[0].reference.human // empty' "$votd_tmp")
-  votd_version=$(jq -r '.response.data.arrayOfVerses[0].local_abbreviation // empty' "$votd_tmp")
-  votd_url=$(jq -r '.response.data.arrayOfVerses[0].canonicalUrl // empty' "$votd_tmp")
-  votd_img=$(jq -r '.response.data.arrayOfVerses[0].images.images[0].renditions | max_by(.width) | .url // empty' "$votd_tmp" | grep -oP 'https:.*')
+  # Parse the VOTD response. bible.com now nests the verse under
+  # .response.data.verse; the old .response.data.arrayOfVerses shape is
+  # kept as fallback in case the API flips back.
+  votd_content=$(jq -r '(.response.data.verse.verses[0].content? // .response.data.arrayOfVerses[0].verses[0].content? // empty)' "$votd_tmp" | tr '\n' ' ')
+  votd_title=$(jq -r '(.response.data.verse.verses[0].reference.human? // .response.data.arrayOfVerses[0].verses[0].reference.human? // empty)' "$votd_tmp")
+  votd_version=$(jq -r '(.response.data.verse.local_abbreviation? // .response.data.arrayOfVerses[0].local_abbreviation? // empty)' "$votd_tmp")
+  votd_url=$(jq -r '(.response.data.verse.canonicalUrl? // .response.data.arrayOfVerses[0].canonicalUrl? // empty)' "$votd_tmp")
+  votd_img=$(jq -r '(.response.data.arrayOfVerses[0].images.images[0].renditions? // []) | max_by(.width) | .url? // empty' "$votd_tmp" | grep -oP 'https:.*')
+  # The new payload has no canonicalUrl: rebuild one from the USFM reference.
+  if [[ -z "$votd_url" ]]; then
+    votd_usfm=$(jq -r '.response.data.referenceTitle.usfm // empty' "$votd_tmp")
+    if [[ -n "$votd_usfm" ]]; then
+      votd_url="/bible/$num/$votd_usfm${votd_version:+.$votd_version}"
+    fi
+  fi
   if [[ -z "$votd_content" || -z "$votd_title" ]]; then
     echo "No verse of the day available."
-    exit 0
+    # return, not exit: home_verse() calls this while drawing the home
+    # screen, and exiting there killed the whole script before the menu.
+    return 1
   fi
   # Set image tmp file
   votd_img_tmp=$(mktemp)

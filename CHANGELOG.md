@@ -147,6 +147,18 @@ All notable changes to this project are documented in this file.
   audio) and the `--listen` / `-l` CLI flag were removed. Reading,
   reading plans, proverbs and highlights are unaffected.
 
+### Fixed
+
+- **Verse of the Day (and the whole home screen) broke on bible.com's
+  new API payload**: the verse now arrives under `.response.data.verse`
+  (with `arrayOfVerses` empty), which the parser read as "no verse" and
+  `votd` responded to with `exit 0` — killing the script mid-`home_verse`
+  so the greeting printed and the menu never appeared. The parser now
+  follows both payload shapes, rebuilds the verse link from the USFM
+  reference when `canonicalUrl` is absent, and returns (instead of
+  exiting) on failure so the home screen falls back to a stale cached
+  verse and always draws the menu.
+
 ## [1.2.0] - 2026-09-15
 
 ### Added
