@@ -158,6 +158,16 @@ All notable changes to this project are documented in this file.
   reference when `canonicalUrl` is absent, and returns (instead of
   exiting) on failure so the home screen falls back to a stale cached
   verse and always draws the menu.
+- **VOTD images are back**: the API stopped returning images
+  (`images: null`), so the Verse of the Day screen showed no artwork
+  (and `--votd` notified without an icon). The image still ships on the
+  VOTD web page: its `og:image` tag is the 640x640 rendition of the
+  first verse image, and the same `imageproxy.youversionapi.com` path
+  also serves 1280x1280. `votd` now falls back to scraping that (only
+  for today's English verse — the page always renders today — and only
+  when `VOTD_TEXT` is unset, so the home screen and cron don't fetch
+  the page needlessly), and also accepts protocol-relative rendition
+  URLs from the API payload itself.
 
 ## [1.2.0] - 2026-09-15
 

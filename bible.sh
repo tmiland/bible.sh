@@ -4057,7 +4057,19 @@ votd() {
   votd_title=$(jq -r '(.response.data.verse.verses[0].reference.human? // .response.data.arrayOfVerses[0].verses[0].reference.human? // empty)' "$votd_tmp")
   votd_version=$(jq -r '(.response.data.verse.local_abbreviation? // .response.data.arrayOfVerses[0].local_abbreviation? // empty)' "$votd_tmp")
   votd_url=$(jq -r '(.response.data.verse.canonicalUrl? // .response.data.arrayOfVerses[0].canonicalUrl? // empty)' "$votd_tmp")
-  votd_img=$(jq -r '(.response.data.arrayOfVerses[0].images.images[0].renditions? // []) | max_by(.width) | .url? // empty' "$votd_tmp" | grep -oP 'https:.*')
+  votd_img=$(jq -r '(.response.data.arrayOfVerses[0].images.images[0].renditions? // .response.data.images[0].renditions? // []) | max_by(.width) | .url? // empty' "$votd_tmp")
+  # The API now returns protocol-relative image URLs (//imageproxy...).
+  [[ "$votd_img" == //* ]] && votd_img="https:$votd_img"
+  # The public API stopped returning images (images: null), but today's
+  # verse image is still on the VOTD page: its og:image tag is the
+  # 640x640 rendition of the first image, and imageproxy also serves the
+  # 1280x1280 rendition. Only safe for today in English — the page always
+  # renders today's English verse.
+  if [[ -z "$votd_img" && -z "${VOTD_TEXT:-}" && "$lang" == "en" && "$doy" == "$(( $(date +%j) + 1 ))" ]]; then
+    votd_img=$(curl -s 'https://www.bible.com/verse-of-the-day' \
+      | grep -oP '<meta property="og:image" content="\Khttps://[^"]+' | head -1)
+    votd_img=${votd_img//\/640x640\//\/1280x1280\/}
+  fi
   # The new payload has no canonicalUrl: rebuild one from the USFM reference.
   if [[ -z "$votd_url" ]]; then
     votd_usfm=$(jq -r '.response.data.referenceTitle.usfm // empty' "$votd_tmp")
