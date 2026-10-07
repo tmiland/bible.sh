@@ -4022,16 +4022,44 @@ votd_cron_status() {
   fi
 }
 
+votd_image() {
+  # $1 = verse text, $2 = reference, $3 = version abbreviation,
+  # $4 = output PNG path. The Verse of the Day API returns no artwork,
+  # so render our own shareable card with ImageMagick. Non-zero when
+  # ImageMagick (or a usable font) is unavailable or the render fails.
+  if [[ ! $(command -v 'convert') ]]; then
+    return 1
+  fi
+  local text="$1" ref="$2" ver="$3" out="$4" serif bold
+  serif=$(command -v 'fc-match' >/dev/null 2>&1 && fc-match -f '%{file}' serif 2>/dev/null) || serif=""
+  [[ -f "$serif" ]] || serif=/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf
+  [[ -f "$serif" ]] || serif=""
+  bold=$(command -v 'fc-match' >/dev/null 2>&1 && fc-match -f '%{file}' 'serif:bold' 2>/dev/null) || bold=""
+  [[ -f "$bold" ]] || bold=/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf
+  [[ -f "$bold" ]] || bold="$serif"
+  local -a serif_font=() bold_font=()
+  [[ -n "$serif" ]] && serif_font=(-font "$serif")
+  [[ -n "$bold" ]] && bold_font=(-font "$bold")
+  # 1080x1080 card: dark gradient, centred verse, gold reference line.
+  convert -size 1080x1080 gradient:'#12233b-#1c1c2e' \
+    \( -background none -fill white "${serif_font[@]}" -pointsize 54 \
+       -interline-spacing 18 -size 880x620 caption:"$text" \) \
+    -gravity center -geometry +0-60 -composite \
+    \( -background none -fill '#f2c14e' "${bold_font[@]}" -pointsize 42 \
+       -size 880x60 caption:"$ref  ·  $ver" \) \
+    -gravity center -geometry +0+360 -composite \
+    "PNG:$out" 2>/dev/null
+  [[ -s "$out" ]]
+}
+
 votd() {
   if [[ "${2:-}" =~ ^[[:digit:]]+$ ]]
   then
     doy=$2
   else
-    # Source - https://stackoverflow.com/a/10112611
-    # Posted by Peter.O, modified by community. See post 'Timeline' for change history
-    # Retrieved 2026-08-23, License - CC BY-SA 3.0
+    # The Platform API indexes the verse of the day by day of the year
+    # (1-366), matching `date +%j` exactly (no +1 offset).
     doy=$(date +%j)
-    doy=$(($doy + 1))
   fi
   version=${1:-}
   lang=en
@@ -4039,48 +4067,58 @@ votd() {
   if [ -z "$version" ]; then
     version="KJV"
   fi
-  votd_tmp=$(mktemp)
-  tmp_files+=("$votd_tmp")
   version_case
-  # Set votd url
-  votd_json_url="https://www.bible.com/api/bible/verse-of-the-day?day=$doy&locale=$lang&versionId=$num"
-  # Send request
-  curl -s "$votd_json_url" > "$votd_tmp" 2>/dev/null
+  # Official Verse of the Day API: one passage reference per day of the
+  # year, with no version and no image attached.
   if [[ ! $(command -v 'jq') ]]; then
     echo "jq not installed..."
     return 1
   fi
-  # Parse the VOTD response. bible.com now nests the verse under
-  # .response.data.verse; the old .response.data.arrayOfVerses shape is
-  # kept as fallback in case the API flips back.
-  votd_content=$(jq -r '(.response.data.verse.verses[0].content? // .response.data.arrayOfVerses[0].verses[0].content? // empty)' "$votd_tmp" | tr '\n' ' ')
-  votd_title=$(jq -r '(.response.data.verse.verses[0].reference.human? // .response.data.arrayOfVerses[0].verses[0].reference.human? // empty)' "$votd_tmp")
-  votd_version=$(jq -r '(.response.data.verse.local_abbreviation? // .response.data.arrayOfVerses[0].local_abbreviation? // empty)' "$votd_tmp")
-  votd_url=$(jq -r '(.response.data.verse.canonicalUrl? // .response.data.arrayOfVerses[0].canonicalUrl? // empty)' "$votd_tmp")
-  votd_img=$(jq -r '(.response.data.arrayOfVerses[0].images.images[0].renditions? // .response.data.images[0].renditions? // []) | max_by(.width) | .url? // empty' "$votd_tmp")
-  # The API now returns protocol-relative image URLs (//imageproxy...).
-  [[ "$votd_img" == //* ]] && votd_img="https:$votd_img"
-  # The public API stopped returning images (images: null), but today's
-  # verse image is still on the VOTD page: its og:image tag is the
-  # 640x640 rendition of the first image, and imageproxy also serves the
-  # 1280x1280 rendition. Only safe for today in English — the page always
-  # renders today's English verse.
-  if [[ -z "$votd_img" && -z "${VOTD_TEXT:-}" && "$lang" == "en" && "$doy" == "$(( $(date +%j) + 1 ))" ]]; then
-    votd_img=$(curl -s 'https://www.bible.com/verse-of-the-day' \
-      | grep -oP '<meta property="og:image" content="\Khttps://[^"]+' | head -1)
-    votd_img=${votd_img//\/640x640\//\/1280x1280\/}
-  fi
-  # The new payload has no canonicalUrl: rebuild one from the USFM reference.
-  if [[ -z "$votd_url" ]]; then
-    votd_usfm=$(jq -r '.response.data.referenceTitle.usfm // empty' "$votd_tmp")
-    if [[ -n "$votd_usfm" ]]; then
-      votd_url="/bible/$num/$votd_usfm${votd_version:+.$votd_version}"
-    fi
-  fi
-  if [[ -z "$votd_content" || -z "$votd_title" ]]; then
+  local votd_usfm votd_api_id votd_json votd_chap_tmp
+  votd_usfm=$(_yvp_api_get "$_YVP_API/verse_of_the_days/$doy" \
+    | jq -r '.passage_id // empty' 2>/dev/null)
+  if [[ -z "$votd_usfm" ]]; then
     echo "No verse of the day available."
     # return, not exit: home_verse() calls this while drawing the home
     # screen, and exiting there killed the whole script before the menu.
+    return 1
+  fi
+  # The passage carries no version, so fetch it separately in the
+  # selected one: licensed versions through the Platform API passages
+  # endpoint, everything else through the keyless chapter API.
+  votd_content=""
+  votd_title=""
+  votd_api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) || votd_api_id=""
+  if [[ -n "$votd_api_id" ]]; then
+    votd_json=$(_yvp_api_get "$_YVP_API/bibles/$votd_api_id/passages/$votd_usfm?format=text" 2>/dev/null) || votd_json=""
+    if [[ -n "$votd_json" ]]; then
+      votd_content=$(printf '%s' "$votd_json" | jq -r '.content // empty' \
+        | tr '\n' ' ' | sed -e 's/[[:space:]]\{1,\}$//')
+      votd_title=$(printf '%s' "$votd_json" | jq -r '.reference // empty')
+    fi
+  fi
+  if [[ -z "$votd_content" ]]; then
+    # Keyless fallback (KJV and other freely readable versions): pull
+    # the passage out of the chapter markup. A passage is either a
+    # single verse (ISA.43.18) or a range (ISA.43.18-19); the chapter
+    # markup carries one span per verse, so ranges are stitched from
+    # their members.
+    votd_chap_tmp=$(mktemp)
+    tmp_files+=("$votd_chap_tmp")
+    votd_chap_ref="${votd_usfm%.*}"
+    votd_verse_spec="${votd_usfm##*.}"
+    _yv_chapter_html "$num" "$votd_chap_ref" > "$votd_chap_tmp"
+    votd_content=""
+    for ((votd_v = ${votd_verse_spec%-*}; votd_v <= ${votd_verse_spec#*-}; votd_v++)); do
+      votd_v_text=$(verse_text "$votd_chap_tmp" "$votd_chap_ref.$votd_v")
+      votd_content="${votd_content:+$votd_content }$votd_v_text"
+    done
+    votd_title="${page_h1}:${votd_verse_spec}"
+  fi
+  votd_version="${version}"
+  votd_url="/bible/$num/$votd_usfm.$votd_version"
+  if [[ -z "$votd_content" || -z "$votd_title" ]]; then
+    echo "No verse of the day available."
     return 1
   fi
   # Set image tmp file
@@ -4088,16 +4126,9 @@ votd() {
   tmp_files+=("$votd_img_tmp")
 
   # VOTD_TEXT=1 (used by the bible frontend home screen): text only,
-  # skip the image download entirely.
-  if [[ -z "${VOTD_TEXT:-}" && -n "$votd_img" ]]; then
-    if [[ $(command -v 'curl') ]]; then
-      curl -fsSLk "$votd_img" > "$votd_img_tmp"
-    elif [[ $(command -v 'wget') ]]; then
-      wget -q "$votd_img" -O "$votd_img_tmp"
-    else
-      echo -e "${RED}${ERROR} This script requires curl or wget.\nProcess aborted${NC}"
-      exit 0
-    fi
+  # skip image generation entirely. Otherwise render the share card.
+  if [[ -z "${VOTD_TEXT:-}" ]]; then
+    votd_image "$votd_content" "$votd_title" "$votd_version" "$votd_img_tmp" || true
   fi
   # Display output
   if [ $lang = "en" ]; then
@@ -4108,7 +4139,7 @@ votd() {
     echo -e "${DIM}Et daglig ord med storlig glede.${NC}"
   fi
   echo
-  if [[ -z "${VOTD_TEXT:-}" && -n "$votd_img" ]]
+  if [[ -z "${VOTD_TEXT:-}" && -s "$votd_img_tmp" ]]
   then
     if [[ $(command -v 'convert') ]]
     then
@@ -4129,6 +4160,14 @@ votd() {
   description=$votd_content
   version=$votd_version
   link=https://www.bible.com$votd_url
+  # Strip quotes from description if any (the passage markup may already
+  # carry its own curly quotes; wrapping those again doubled them up)
+  if [[ $description =~ $BQUOTE ]] ||
+  [[ $description =~ $EQUOTE ]]
+  then
+    BQUOTE=''
+    EQUOTE=''
+  fi
   # Display output
   output_correction || return 1
   output "$description" "$book" "$chapter_verse" "$version" "$link"
@@ -4148,11 +4187,13 @@ votd() {
     # Send notification to desktop
     if [[ $(command -v 'notify-send') ]]
     then
+      local notify_icon=()
+      [[ -s "$votd_img_tmp" ]] && notify_icon=(--icon="$votd_img_tmp")
       notify-send \
         --hint=string:sound-name:dialog-information \
         --app-name="Verse of the Day" \
         --app-icon="dialog-information-symbolic" \
-        --icon="$votd_img_tmp" \
+        "${notify_icon[@]}" \
         "Verse of the Day" \
         "$message"
       rm "$votd_img_tmp"

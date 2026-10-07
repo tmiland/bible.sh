@@ -149,25 +149,29 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
-- **Verse of the Day (and the whole home screen) broke on bible.com's
-  new API payload**: the verse now arrives under `.response.data.verse`
-  (with `arrayOfVerses` empty), which the parser read as "no verse" and
-  `votd` responded to with `exit 0` — killing the script mid-`home_verse`
-  so the greeting printed and the menu never appeared. The parser now
-  follows both payload shapes, rebuilds the verse link from the USFM
-  reference when `canonicalUrl` is absent, and returns (instead of
-  exiting) on failure so the home screen falls back to a stale cached
-  verse and always draws the menu.
-- **VOTD images are back**: the API stopped returning images
-  (`images: null`), so the Verse of the Day screen showed no artwork
-  (and `--votd` notified without an icon). The image still ships on the
-  VOTD web page: its `og:image` tag is the 640x640 rendition of the
-  first verse image, and the same `imageproxy.youversionapi.com` path
-  also serves 1280x1280. `votd` now falls back to scraping that (only
-  for today's English verse — the page always renders today — and only
-  when `VOTD_TEXT` is unset, so the home screen and cron don't fetch
-  the page needlessly), and also accepts protocol-relative rendition
-  URLs from the API payload itself.
+- **Verse of the Day (and the whole home screen) broke when `votd`
+  failed**: the function used to `exit 0`, killing the script
+  mid-`home_verse` — the greeting printed and the menu never appeared.
+  It now returns instead, and the home screen falls back to the stale
+  cached verse. The daily reference comes from the official
+  `verse_of_the_days/$doy` endpoint (day-of-year matches `date +%j`, so
+  the CLI, the app and the API agree), and the passage text is fetched
+  separately in the selected version: Platform API `passages` for
+  licensed versions, the keyless chapter API otherwise (ranges stitched
+  verse by verse).
+- **VOTD artwork is rendered locally**: the API returns no images
+  (`images: null`), and scraping the page's `og:image` was English-only
+  and fragile, so `votd` now renders its own 1080×1080 share card
+  locally — dark gradient, centred serif verse, gold reference — when
+  ImageMagick is available. The notification
+  attaches the card as its icon only when the render succeeded, and
+  `VOTD_TEXT=1` skips rendering entirely.
+- **VOTD doubled its quotation marks**: passage text can already carry
+  its own curly quotes (`“Forget …`), and the display wrapper added a
+  second pair, rendering `““Forget … wasteland.”`. `votd` now blanks
+  the wrapper quotes when the text carries its own — the same rule the
+  reader has always applied — so home, `--votd` and Telegram all show
+  single quotes (KJV, whose text has none, keeps the wrapper pair).
 
 ## [1.2.0] - 2026-09-15
 
