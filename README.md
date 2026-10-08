@@ -1,5 +1,7 @@
 <div align="center">
 
+# **Archived since the missing version make this script unusable, and the fallbacks have been removed**
+
 # 📖 bible.sh
 
 **The Bible, on your terminal. Whole. Offline. Yours.**
