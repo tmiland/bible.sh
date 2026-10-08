@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Removed
+- **Search no longer parsing the bible.com search**: when the
+  YouVersion Platform API can't run and the requested version has no
+  offline database, search now says so (with the `bible install KJV`
+  hint) instead of parsing bible.com's results. API-first search
+  and the offline KJV fallback are unchanged.
+
 ## [1.3.0] - 2026-10-07
 
 ### Added
@@ -119,7 +128,7 @@ All notable changes to this project are documented in this file.
   "Custom hex…" for anything else. The hex argument still works
   non-interactively, and the old default (`5dff79`) is no longer
   needed for new highlights.
-- **Chapter reads no longer scrape bible.com HTML**: they now use the
+- **Chapter reads no longer parses bible.com**: they now use the
   YouVersion JSON API —
   `bible.youversionapi.com/3.1/chapter.json` for verse text (single
   verses, ranges and whole chapters from one keyless fetch; verses are

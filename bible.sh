@@ -256,8 +256,7 @@ _install_all_versions() {
 uninstall_version() {
   # $1 = version code (default KJV); -y/--yes skips the confirmation,
   # --all removes every supported offline version. After this, reading
-  # falls back to the keyless YouVersion JSON API and search to the
-  # bible.com search page.
+  # and search falls back to the online Platform API.
   local ver="" assume_yes=false do_all=false arg
   for arg in "$@"; do
     case "$arg" in
@@ -309,7 +308,7 @@ uninstall_version() {
   rm -f -- "${files[@]}"
   echo "Uninstalled offline: ${versions[*]}."
   echo "Reading now falls back to the online YouVersion JSON API;"
-  echo "search falls back to the bible.com search page."
+  echo "search uses the online Platform API."
 }
 
 _fetch_and_build() {
@@ -4229,8 +4228,7 @@ search() {
   # print the page. The API answer is final even when it has no matches
   # (its "did you mean" hints are part of the feature set). Only when
   # the API cannot run (no key / not licensed / request failed) do we
-  # fall back, first to the local database, then to the bible.com
-  # search.
+  # fall back to the local database.
   local api_id rc api_notice=""
   if api_id=$(_yvp_bible_id "$num" "$lang" "$version" 2>/dev/null) && [[ -n "$api_id" ]]; then
     if [[ -t 0 || -n "$force_loop" ]]; then
@@ -4243,13 +4241,13 @@ search() {
       _yvp_search_render "$num" "$version" "$api_id"
       return 0
     fi
-    api_notice="YouVersion API search didn't answer (offline now, or rate-limited). Showing local/online results instead:"
+    api_notice="YouVersion API search didn't answer (offline now, or rate-limited)."
   elif [[ -z "$(_yvp_key 2>/dev/null)" ]]; then
     # No app key configured: the API leg never runs, so skip the
     # error noise and let the regular fallbacks take over.
     api_notice=""
   else
-    api_notice="YouVersion API search isn't licensed for \"$version\" (or no cached license). Showing local/online results instead:"
+    api_notice="YouVersion API search isn't licensed or available for \"$version\" (or no cached license)."
   fi
 
   [[ -n "$api_notice" ]] && echo "${DIM}$api_notice${NC}"
@@ -4257,80 +4255,20 @@ search() {
   # Offline fallback: search the local database when the requested
   # version is installed locally.
   if [[ "$version" == "KJV" ]] && _offline_is_installed "KJV"; then
+    echo "${DIM}Showing local results instead:${NC}"
     if local_search "$query" "$version"; then
       return 0
     fi
   fi
 
-  get_url_id=$(
-    curl -s "https://www.bible.com/search/bible?query=test" |
-    grep -Po "<script src=\"/_next/static/chunks/.*?(?>\")" |
-    tail -n 1 |
-    sed "s|<script src=\"/_next/static/chunks/||g" |
-    sed "s|/*.js\"||g"
-  )
-  # Source: https://linuxopsys.com/read-json-file-in-shell-script
-  bible_search_tmp=$(mktemp)
-  tmp_files+=("$bible_search_tmp")
-  bible_search_tmp2=$(mktemp)
-  tmp_files+=("$bible_search_tmp2")
-  # URL-encode the search query by replacing spaces with + signs
-  if [[ "$query" == *" "* ]]; then
-    query=${query// /+}
+  # Neither the API nor a local database could answer.
+  echo "No results: the YouVersion API search didn't answer and no offline $version database is installed."
+  if [[ "$version" == "KJV" ]]; then
+    echo "Install it for offline search: bible install KJV"
+  else
+    echo "Only KJV is available offline: bible install KJV"
   fi
-
-  curl -s \
-    --compressed \
-    -H 'Accept: */*' \
-    -H "Cookie: version=$num" \
-    -H 'Pragma: no-cache' \
-    -H 'Cache-Control: no-cache' \
-    "https://www.bible.com/search/bible?query=$query&_rsc=$get_url_id" > "$bible_search_tmp"
-  echo ""
-  echo "Search results from bible.com"
-  echo ""
-  divider_line
-  # echo "-----------------------------------------------------------------------------"
-  # json verses content human version_local_abbreviation "$bible_search_tmp" |
-  grep -Po "<div class=\"flex rounded-0.5 border-small border-gray-10 p-2 dark:border-gray-40\">\K(.*?)</div>" "$bible_search_tmp" > "$bible_search_tmp2"
-  while IFS= read -r search_results; do
-    description=$(
-      echo "$search_results" \
-        | grep -Po "mbe-1\">\K(.*?)</p>" | sed "s|</p>||g" \
-        | fold -w ${width} -s
-    )
-    # bible.com streams some result cards as React placeholders
-    # (Loading…); they parse with an empty description. Skip them
-    # instead of letting output_correction print a false "No result."
-    [[ -z "$description" ]] && continue
-    chapter_verse=$(
-      echo "$search_results" \
-        | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | grep -Po "\">\K(.*?)<\!--" | sed "s|<\!--||g"
-    )
-    version=$(
-      echo "$search_results" \
-        | grep -Po "\(<\!-- -->\K(.*?)<\!-- -->\)" | sed "s|<\!-- -->)||g"
-    )
-    link=$(
-      echo "$search_results" \
-        | grep -Po "href=\"\K(.*?)\">" | sed "s|\">||g"
-    )
-    book=$(
-      echo "$chapter_verse" | grep -Po '.* [0-9]+' | sed 's| [0-9].*||g'
-    )
-    chapter_verse=$(
-      echo "$chapter_verse" | grep -Po ' [0-9].*' | sed 's| ||g'
-    )
-    link="https://www.bible.com$link"
-    # Display output
-    output_correction || continue
-    output "$description" "$book" "$chapter_verse" "$version" "$link"
-    divider_line
-    # Delete tmp file
-    rm "$bible_search_tmp" 2>/dev/null
-    sleep 0.1
-  done < "$bible_search_tmp2"
-  rm "$bible_search_tmp2" 2>/dev/null
+  return 1
 }
 
 compare() {
@@ -4460,7 +4398,7 @@ bible.sh — the whole Bible in one shell file.
                        (licensed versions): a pickable list of results
                        with the verse text shown, pagination and "did
                        you mean" suggestions. Falls back to the offline
-                       KJV database, then the bible.com search page.
+                       KJV database.
   --votd      | -v     bible -v
                        Daily cronjob:  bible votd install 07:00 KJV
                        Remove/status:  bible votd remove | bible votd status
@@ -4488,8 +4426,8 @@ bible.sh — the whole Bible in one shell file.
                        Refresh a locally installed version.
   uninstall            bible uninstall [VERSION] [-y|--yes] [--all]
                        Remove a locally installed version. Reading
-                       then falls back to the online JSON API and
-                       search to the bible.com search page.
+                       then falls back to the online Platform API
+                       for supported versions.
   status               bible status
                        Show locally installed versions.
   versions             bible versions [LANG]

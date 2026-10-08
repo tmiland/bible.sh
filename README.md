@@ -18,6 +18,12 @@ command away.
 
 </div>
 
+##⚠️ Missing versions
+
+**Still not in the API, 13 versions:**
+English: ```KJV, KJVAAE, KJVAE, NKJV, ESV, NLT, WBMS```
+Norwegian: ```NB, N78BM, N11BM, B2024BM, BGO, BGO_HVER```
+
 ---
 
 ## ✨ Why you'll love it
@@ -155,9 +161,8 @@ cached for the session, no per-verse fetching on repeat — with
 pagination via the next-page token and "did you mean" / "search
 instead for" hints surfaced. Interactive runs let you pick a match to
 open its chapter or page through the rest; non-interactive ones print
-the page of results. Falls back to the offline KJV database, then the
-bible.com search page, when the API can't run — search tells you when
-it does.
+the page of results. Falls back to the offline KJV database when the
+API can't run — search tells you when it does.
 
 ### 📖 Flexible reference parsing
 
